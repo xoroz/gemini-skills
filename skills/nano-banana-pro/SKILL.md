@@ -9,7 +9,12 @@ Generate custom images using Google's Gemini 2.5 Flash model for integration int
 
 ## Prerequisites
 
-Set the `GEMINI_API_KEY` environment variable with your Google AI API key.
+Set at least one of these environment variables:
+
+- `GEMINI_API_KEY` — Google AI API key (primary provider)
+- `OPENROUTER_API_KEY` — OpenRouter API key (fallback provider)
+
+In **auto** mode (default), the script tries Gemini first, then falls back to OpenRouter if Gemini fails (e.g. rate limits).
 
 ## Image Generation Workflow
 
@@ -26,10 +31,24 @@ uv run "${SKILL_DIR}/scripts/image.py" \
 Where `${SKILL_DIR}` is the directory containing this SKILL.md file.
 
 Options:
+
 - `--prompt` (required): Detailed description of the image to generate
 - `--output` (required): Output file path (PNG format)
 - `--aspect` (optional): Aspect ratio - "square", "landscape", "portrait" (default: square)
-- `--reference` (optional): Path to a reference image for style, composition, or content guidance
+- `--quality` (optional): Image quality - "high" for production, "draft" for quick mockups (default: high)
+- `--reference` (optional): Path to a reference image for style guidance (Gemini only)
+- `--provider` (optional): "auto", "gemini", or "openrouter" (default: auto)
+
+### Using Draft Quality
+
+For quick mockups and landing page drafts, use `--quality draft` to generate simpler images faster:
+
+```bash
+uv run "${SKILL_DIR}/scripts/image.py" \
+  --prompt "Hero image for auto repair shop" \
+  --output "./assets/hero.png" \
+  --quality draft
+```
 
 ### Using a Reference Image
 
@@ -44,25 +63,44 @@ uv run "${SKILL_DIR}/scripts/image.py" \
 
 The reference image helps Gemini understand the desired style, composition, or visual elements you want in the generated image.
 
+### Forcing a Specific Provider
+
+```bash
+# Force OpenRouter only
+uv run "${SKILL_DIR}/scripts/image.py" \
+  --prompt "A sunset" \
+  --output "./sunset.png" \
+  --provider openrouter
+
+# Force Gemini only (no fallback)
+uv run "${SKILL_DIR}/scripts/image.py" \
+  --prompt "A sunset" \
+  --output "./sunset.png" \
+  --provider gemini
+```
+
 ### Step 2: Integrate with Frontend Design
 
 After generating images, incorporate them into frontend code:
 
 **HTML/CSS:**
+
 ```html
-<img src="./generated-hero.png" alt="Description" class="hero-image" />
+<img src="./assets/generated-hero.png" alt="Description" class="hero-image" />
 ```
 
 **React:**
+
 ```jsx
 import heroImage from './assets/generated-hero.png';
 <img src={heroImage} alt="Description" className="hero-image" />
 ```
 
 **CSS Background:**
+
 ```css
 .hero-section {
-  background-image: url('./generated-hero.png');
+  background-image: url('./assets/generated-hero.png');
   background-size: cover;
   background-position: center;
 }
@@ -106,6 +144,7 @@ When used alongside the frontend-design skill:
 ## Output Location
 
 By default, save generated images to the project's assets directory:
+
 - `./assets/` for simple HTML projects
 - `./src/assets/` or `./public/` for React/Vue projects
 - Use descriptive filenames: `hero-abstract-gradient.png`, `icon-user-avatar.png`

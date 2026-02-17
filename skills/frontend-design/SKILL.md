@@ -40,3 +40,37 @@ Interpret creatively and make unexpected choices that feel genuinely designed fo
 **IMPORTANT**: Match implementation complexity to the aesthetic vision. Maximalist designs need elaborate code with extensive animations and effects. Minimalist or refined designs need restraint, precision, and careful attention to spacing, typography, and subtle details. Elegance comes from executing the vision well.
 
 Remember: Claude is capable of extraordinary creative work. Don't hold back, show what can truly be created when thinking outside the box and committing fully to a distinctive vision.
+
+## Asset & File Structure Rules
+
+**CRITICAL**: Every frontend project MUST follow these rules:
+
+### Local Assets Only — No External Image URLs
+- **NEVER** use external image URLs (no `unsplash.com`, no `placeholder.com`, no CDN-hosted images).
+- All images MUST be local files in an `assets/` folder with relative paths.
+- Use the **nano-banana-pro** skill to generate any needed images before building the HTML.
+- Reference images as: `src="assets/image-name.png"` (relative paths).
+- Every `<img>` tag MUST have descriptive `alt` text.
+
+### Separate CSS File
+- **NEVER** put CSS inside `<style>` tags in the HTML file.
+- All CSS goes in a separate `style.css` file.
+- Link it in the HTML `<head>`: `<link rel="stylesheet" href="style.css">`
+- Use `@import` for Google Fonts at the top of `style.css`.
+
+### Expected Output Structure
+```
+project/
+├── assets/
+│   ├── hero.png
+│   ├── gallery-1.png
+│   └── ...
+├── index.html
+└── style.css
+```
+
+### Workflow
+1. **Generate images first** using nano-banana-pro into the `assets/` folder
+2. **Build the HTML** referencing local `assets/` paths
+3. **Write the CSS** in a separate `style.css` file
+4. **Never use placeholder or external image URLs**
