@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vaniglia - Pizza Contemporanea a Marina di Carrara</title>
+    <meta name="description" content="Esperienza gastronomica unica a Marina di Carrara. Pizza artigianale con ingredienti di alta qualità.">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Navigazione Fissa -->
+    <header class="main-header">
+        <nav class="container nav-wrapper">
+            <div class="logo">
+                <a href="#">Vaniglia</a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#menu">Specialità</a></li>
+                <li><a href="#gallery">Galleria</a></li>
+                <li><a href="#storia">La Storia</a></li>
+                <li><a href="#contatti">Contatti</a></li>
+            </ul>
+            <div class="nav-cta">
+                <a href="tel:0585632291" class="btn btn-primary">Prenota Tavolo</a>
+            </div>
+            <div class="mobile-toggle">
+                <i class="fas fa-bars"></i>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Hero Section -->
+        <section class="hero" id="home">
+            <div class="hero-overlay"></div>
+            <img src="assets/hero.png" alt="Pizza gourmet appena sfornata" class="hero-bg">
+            <div class="container hero-content">
+                <h1 class="reveal-text">L'Arte della Pizza Contemporanea</h1>
+                <p class="reveal-text-slow">A Marina di Carrara, una sinfonia di sapori autentici e innovazione culinaria.</p>
+                <div class="hero-btns reveal">
+                    <a href="#menu" class="btn btn-primary">Scopri il Menu</a>
+                    <a href="#contatti" class="btn btn-outline">Dove Siamo</a>
+                </div>
+            </div>
+            <div class="scroll-indicator">
+                <div class="mouse"></div>
+            </div>
+        </section>
+
+        <!-- Servizi/Esperienze -->
+        <section class="services" id="menu">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="sub-title">L'Esperienza Vaniglia</span>
+                    <h2 class="reveal">Perché Sceglierci</h2>
+                </div>
+                <div class="services-grid">
+                    <div class="service-card reveal">
+                        <i class="fas fa-wheat-awn"></i>
+                        <h3>Lievitazione 48h</h3>
+                        <p>Il segreto della nostra leggerezza risiede nel tempo e nella pazienza.</p>
+                    </div>
+                    <div class="service-card reveal" style="transition-delay: 0.1s;">
+                        <i class="fas fa-leaf"></i>
+                        <h3>Ingredienti DOP</h3>
+                        <p>Selezioniamo solo le eccellenze del territorio italiano per ogni condimento.</p>
+                    </div>
+                    <div class="service-card reveal" style="transition-delay: 0.2s;">
+                        <i class="fas fa-fire-burner"></i>
+                        <h3>Forno a Legna</h3>
+                        <p>La cottura tradizionale che esalta il profumo del grano antico.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Galleria/Lavori Recenti -->
+        <section class="gallery" id="gallery">
+            <div class="container-fluid p-0">
+                <div class="gallery-grid">
+                    <div class="gallery-item reveal">
+                        <img src="assets/gallery-1.png" alt="Dettaglio pizza margherita gourmet">
+                        <div class="gallery-overlay">
+                            <span>Tradizione</span>
+                        </div>
+                    </div>
+                    <div class="gallery-item reveal">
+                        <img src="assets/gallery-2.png" alt="Interni raffinati del ristorante">
+                        <div class="gallery-overlay">
+                            <span>Atmosfera</span>
+                        </div>
+                    </div>
+                    <div class="gallery-item reveal">
+                        <img src="assets/detail.png" alt="Dettaglio ingredienti freschi">
+                        <div class="gallery-overlay">
+                            <span>Qualità</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Chi Siamo -->
+        <section class="about" id="storia">
+            <div class="container">
+                <div class="about-wrapper">
+                    <div class="about-image reveal">
+                        <img src="assets/workshop.png" alt="Il nostro mastro pizzaiolo al lavoro">
+                    </div>
+                    <div class="about-content">
+                        <span class="sub-title">La Nostra Storia</span>
+                        <h2 class="reveal">Passione e Territorio</h2>
+                        <p class="reveal">Vaniglia non è solo una pizzeria, è il sogno di portare l'eccellenza della pizza contemporanea nel cuore di Marina di Carrara. Ogni impasto è una dedica alla nostra terra.</p>
+                        <p class="reveal">Dalla ricerca di farine macinate a pietra alla scelta del miglior pomodoro San Marzano, ogni dettaglio è curato per offrirvi un'esperienza indimenticabile.</p>
+                        <a href="#gallery" class="btn btn-link reveal">Guarda la nostra galleria <i class="fas fa-arrow-right"></i></a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Il Nostro Processo -->
+        <section class="process">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="sub-title">Il Nostro Metodo</span>
+                    <h2>Dalla Terra alla Tavola</h2>
+                </div>
+                <div class="process-steps">
+                    <div class="step reveal">
+                        <div class="step-number">01</div>
+                        <h3>Selezione</h3>
+                        <p>Scegliamo personalmente ogni fornitore per garantire freschezza assoluta.</p>
+                    </div>
+                    <div class="step reveal" style="transition-delay: 0.1s;">
+                        <div class="step-number">02</div>
+                        <h3>Impasto</h3>
+                        <p>Tecnica e precisione per un'idratazione perfetta e digeribilità superiore.</p>
+                    </div>
+                    <div class="step reveal" style="transition-delay: 0.2s;">
+                        <div class="step-number">03</div>
+                        <h3>Cottura</h3>
+                        <p>Controllo millimetrico della fiamma per il cornicione perfetto.</p>
+                    </div>
+                </div>
+                <div class="process-image reveal">
+                    <img src="assets/process.png" alt="Fasi della preparazione della pizza">
+                </div>
+            </div>
+        </section>
+
+        <!-- Testimonianze -->
+        <section class="testimonials">
+            <div class="container">
+                <div class="section-header text-center">
+                    <span class="sub-title">Recensioni</span>
+                    <h2>Cosa Dicono i Nostri Clienti</h2>
+                </div>
+                <div class="testimonials-grid">
+                    <div class="testimonial-card reveal">
+                        <div class="stars">
+                            <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                        </div>
+                        <p>"La miglior pizza che abbia mai mangiato a Carrara. Impasto leggerissimo e ingredienti di prima scelta."</p>
+                        <div class="author">- Marco R.</div>
+                    </div>
+                    <div class="testimonial-card reveal" style="transition-delay: 0.1s;">
+                        <div class="stars">
+                            <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                        </div>
+                        <p>"Locale moderno e accogliente. Servizio impeccabile e pizza gourmet davvero innovativa."</p>
+                        <div class="author">- Elena B.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Contatti -->
+        <section class="contact" id="contatti">
+            <div class="container">
+                <div class="contact-grid">
+                    <div class="contact-info reveal">
+                        <span class="sub-title">Contattaci</span>
+                        <h2>Vieni a Trovarci</h2>
+                        <p>Siamo nel cuore di Marina di Carrara, pronti ad accoglierti.</p>
+                        
+                        <div class="info-item">
+                            <i class="fas fa-location-dot"></i>
+                            <div>
+                                <h4>Indirizzo</h4>
+                                <p>Ruga Alfio Maggiani, 60, 54033 Marina di Carrara MS</p>
+                            </div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <i class="fas fa-phone"></i>
+                            <div>
+                                <h4>Telefono</h4>
+                                <p><a href="tel:0585632291">0585 632291</a></p>
+                            </div>
+                        </div>
+
+                        <div class="info-item">
+                            <i class="fas fa-clock"></i>
+                            <div>
+                                <h4>Orari</h4>
+                                <p>Mar - Dom: 19:00 - 23:30<br>Lunedì: Chiuso</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="contact-form reveal">
+                        <form id="booking-form">
+                            <div class="form-group">
+                                <label for="name">Nome Completo</label>
+                                <input type="text" id="name" name="name" placeholder="Inserisci il tuo nome" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="email">Email</label>
+                                <input type="email" id="email" name="email" placeholder="la-tua@email.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="message">Messaggio / Richiesta Prenotazione</label>
+                                <textarea id="message" name="message" rows="5" placeholder="Come possiamo aiutarti?" required></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary full-width">Invia Messaggio</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="main-footer">
+        <div class="container">
+            <div class="footer-top">
+                <div class="footer-brand">
+                    <a href="#" class="logo">Vaniglia</a>
+                    <p>L'eccellenza della pizza contemporanea a Marina di Carrara.</p>
+                </div>
+                <div class="footer-links">
+                    <h4>Link Rapidi</h4>
+                    <ul>
+                        <li><a href="#home">Home</a></li>
+                        <li><a href="#menu">Menu</a></li>
+                        <li><a href="#storia">La Nostra Storia</a></li>
+                        <li><a href="#contatti">Contatti</a></li>
+                    </ul>
+                </div>
+                <div class="footer-social">
+                    <h4>Seguici</h4>
+                    <div class="social-icons">
+                        <a href="#"><i class="fab fa-instagram"></i></a>
+                        <a href="#"><i class="fab fa-facebook-f"></i></a>
+                        <a href="#"><i class="fab fa-tripadvisor"></i></a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Ristorante Vaniglia. Tutti i diritti riservati. P.IVA 01234567890</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Script -->
+    <script src="script.js"></script>
+</body>
+</html>
