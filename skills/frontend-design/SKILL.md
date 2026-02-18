@@ -67,9 +67,8 @@ Remember: Claude is capable of extraordinary creative work. Don't hold back, sho
 ### JavaScript Safety
 
 - **NEVER** use `window` as a variable name in loops or callbacks (e.g. `forEach(window => ...)`). Use `el` or `element` instead.
-- All page content MUST be visible without JavaScript. If using scroll-reveal animations, elements must be visible by default in CSS. Only hide them via JS after the script loads — so if JS fails, content is still visible.
-- Prefer CSS animations (`@keyframes`, `transition`) over JS where possible.
-- Keep inline scripts minimal and bug-free.
+- Include JavaScript for scroll animations, reveal effects, and interactivity — these are encouraged.
+- Keep inline scripts well-tested and bug-free.
 
 ### Expected Output Structure
 
@@ -88,28 +87,11 @@ project/
 1. **Check if images exist** in the `assets/` folder. If they do, skip to step 3.
 2. **Generate images** using nano-banana-pro into the `assets/` folder (only if needed).
 3. **Build the HTML** referencing local `assets/` paths. Use ALL available images.
-4. **Write the CSS** in a separate `style.css` file.
+4. **Write the CSS** in a separate `style.css` file, matching the exact class names from the HTML.
 5. **Never use placeholder or external image URLs**
 
 ## Output Rules
 
 ### No Preamble
 
-When outputting code, start IMMEDIATELY with the code. Do NOT output explanation, commentary, or thinking text before the code. Your very first character should be `<` (the start of `<!DOCTYPE html>`).
-
-### Combined HTML + CSS Output
-
-When generating both HTML and CSS together, use this delimiter format:
-
-```
-<!DOCTYPE html>
-<html lang="...">
-...
-</html>
-===STYLE_CSS===
-@import url('...');
-:root { ... }
-...
-```
-
-Output the complete HTML first, then `===STYLE_CSS===` on its own line, then the complete CSS. No markdown code blocks, just raw code.
+When outputting code, start IMMEDIATELY with the code. Do NOT output explanation, commentary, or thinking text before the code. Your very first character should be `<` (the start of `<!DOCTYPE html>`) for HTML, or `@` / `:` / `/*` for CSS.

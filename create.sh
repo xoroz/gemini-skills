@@ -191,7 +191,7 @@ echo ""
 echo "✅ Images done! ($IMAGES_GENERATED/$IMG_TOTAL generated, $IMAGES_FAILED failed)"
 echo ""
 
-# 6. GENERATE HTML + CSS IN ONE CALL
+# 6. GENERATE HTML
 PROMPT="
 You are an expert web designer using the frontend-design skill.
 PROJECT: Create a high-converting landing page for a local business.
@@ -209,7 +209,8 @@ DESIGN INSTRUCTIONS:
 Create a landing page design for a local $NICHE company. 
 Use the frontend-design skill to ensure distinctive, production-grade aesthetics.
 Use typography and design style that works for this niche. 
-Use icons from Font Awesome (CDN) instead of using emoji. 
+Use icons from Font Awesome (CDN) instead of using emoji.
+Include JavaScript for scroll animations, reveal effects, and interactivity.
 
 REQUIRED SECTIONS:
 $SECTION_NAMES
@@ -238,56 +239,73 @@ DESIGN REQUIREMENTS:
 - The nav/header must use flexbox: logo left, links center, CTA button right — all on one horizontal line.
 - Include hover effects, transitions, and scroll-based animations.
 
-JAVASCRIPT RULES:
-- NEVER use 'window' as a variable name in loops or callbacks (e.g. forEach(window => ...)). Use 'el' or 'element' instead.
-- All content MUST be visible without JavaScript. If using reveal/scroll animations, set elements to visible by default in CSS and only add initial hidden state via JS after it loads.
-- Keep scripts minimal. Prefer CSS animations over JS where possible.
+JAVASCRIPT RULE:
+- NEVER use 'window' as a variable name in forEach, map, or any callback. Use 'el' or 'element'. Example: elements.forEach(el => { ... })
 
 OUTPUT FORMAT - CRITICAL:
 Your VERY FIRST character of output MUST be '<' (the start of <!DOCTYPE html>).
-Do NOT output any explanation, commentary, thinking, or preamble text before the HTML.
-Do NOT say what you are going to do. Just output the code directly.
-Output the HTML first, then the exact delimiter line ===STYLE_CSS=== on its own line, then the CSS.
-Do NOT include any CSS inside <style> tags in the HTML. The HTML must link to style.css.
-Set lang=\"$SITE_LANG\" on the <html> tag.
-Do NOT wrap in markdown code blocks. Just raw HTML, then the delimiter, then raw CSS.
-
-Expected output (no text before <!DOCTYPE):
-<!DOCTYPE html>
-<html lang=\"$SITE_LANG\">
-<head>
-  <link rel=\"stylesheet\" href=\"style.css\">
-</head>
-<body>
-  ...
-</body>
-</html>
-===STYLE_CSS===
-@import url('https://fonts.googleapis.com/...');
-:root { ... }
-...
+Do NOT output any explanation, commentary, thinking, or preamble before the code.
+Do NOT say what you are going to do. Just output the raw HTML directly.
+- Output ONLY the raw HTML5 content for index.html.
+- Do NOT include any CSS in the HTML file. No <style> tags at all.
+- All styling will go in a separate file. Link it with: <link rel=\"stylesheet\" href=\"style.css\">
+- Set lang=\"$SITE_LANG\" on the <html> tag.
+- Do not output markdown code blocks. Just raw HTML code.
 "
 
-echo "🔨 Generating index.html + style.css in one pass ($LANG_NAME)..."
-COMBINED_OUTPUT=$(echo "$PROMPT" | gemini -y -p "" 2>> "$LOG_FILE")
+echo "🔨 Generating index.html ($LANG_NAME)..."
+echo "$PROMPT" | gemini -y -p "" > "$FOLDER_NAME/index.html" 2>> "$LOG_FILE"
 
-# Split output at the delimiter
-echo "$COMBINED_OUTPUT" | sed '/^===STYLE_CSS===$/,$d' > "$FOLDER_NAME/index.html"
-echo "$COMBINED_OUTPUT" | sed -n '/^===STYLE_CSS===$/,$ { /^===STYLE_CSS===$/d; p; }' > "$FOLDER_NAME/style.css"
+# Strip any AI preamble before <!DOCTYPE
+if ! head -1 "$FOLDER_NAME/index.html" | grep -q "<!DOCTYPE"; then
+  sed -i -n '/<!DOCTYPE/,$p' "$FOLDER_NAME/index.html"
+fi
 
 HTML_SIZE=$(wc -c < "$FOLDER_NAME/index.html" 2>/dev/null || echo 0)
-CSS_SIZE=$(wc -c < "$FOLDER_NAME/style.css" 2>/dev/null || echo 0)
+echo "✅ index.html created! ($(numfmt --to=iec $HTML_SIZE 2>/dev/null || echo "${HTML_SIZE}B"))"
 
-# Verify both files were generated
-if [ "$HTML_SIZE" -lt 100 ] || [ "$CSS_SIZE" -lt 100 ]; then
-  echo "⚠️  Warning: Split may have failed. Check if delimiter ===STYLE_CSS=== was in the output."
-  echo "   HTML: ${HTML_SIZE} bytes, CSS: ${CSS_SIZE} bytes"
-  echo "   Raw output saved to: $FOLDER_NAME/raw_output.txt"
-  echo "$COMBINED_OUTPUT" > "$FOLDER_NAME/raw_output.txt"
-else
-  echo "✅ index.html created! ($(numfmt --to=iec $HTML_SIZE 2>/dev/null || echo "${HTML_SIZE}B"))"
-  echo "✅ style.css created! ($(numfmt --to=iec $CSS_SIZE 2>/dev/null || echo "${CSS_SIZE}B"))"
+# 7. GENERATE CSS (fed with actual HTML for class name matching)
+GENERATED_HTML=$(cat "$FOLDER_NAME/index.html")
+
+CSS_PROMPT="
+You are an expert CSS designer using the frontend-design skill.
+Generate the complete CSS stylesheet for the HTML page below.
+
+CRITICAL: Read the HTML carefully. Style EVERY class, ID, and element used in it.
+You MUST match the EXACT class names and IDs from the HTML. Do not invent new ones.
+
+DESIGN DIRECTION:
+- This is a $NICHE business landing page for $BUSINESS_NAME.
+- Use the frontend-design skill aesthetic guidelines.
+- Choose distinctive typography (Google Fonts, not generic fonts).
+- Create a cohesive color palette fitting the $NICHE industry.
+- Add smooth animations, transitions, and micro-interactions.
+- Make it fully responsive with mobile breakpoints.
+- Use CSS variables for the color system.
+- The nav/header must use flexbox: logo left, links center, CTA right — all on one horizontal line.
+- Include hover effects and scroll-based animations.
+- Make sure .reveal elements start visible, and any JS-driven animation classes only enhance them.
+
+OUTPUT FORMAT - CRITICAL:
+Your VERY FIRST character of output must be '@' (for @import) or ':' (for :root) or '/' (for a CSS comment).
+Do NOT output any explanation, commentary, or preamble. Just raw CSS.
+Do NOT wrap in markdown code blocks. Just the raw CSS code.
+Include @import for Google Fonts at the top if needed.
+
+HERE IS THE HTML TO STYLE:
+$GENERATED_HTML
+"
+
+echo "🎨 Generating style.css..."
+echo "$CSS_PROMPT" | gemini -y -p "" > "$FOLDER_NAME/style.css" 2>> "$LOG_FILE"
+
+# Strip any AI preamble before actual CSS
+if ! head -1 "$FOLDER_NAME/style.css" | grep -qE "^[@:\/\*\.]"; then
+  sed -i -n '/^[@:\/\*\.#a-zA-Z]/,$p' "$FOLDER_NAME/style.css"
 fi
+
+CSS_SIZE=$(wc -c < "$FOLDER_NAME/style.css" 2>/dev/null || echo 0)
+echo "✅ style.css created! ($(numfmt --to=iec $CSS_SIZE 2>/dev/null || echo "${CSS_SIZE}B"))"
 
 # 8. CALCULATE STATS
 END_TIME=$(date +%s)
@@ -304,7 +322,7 @@ TOTAL_SIZE=$(du -sb "$FOLDER_NAME" 2>/dev/null | cut -f1 || echo 0)
 # Gemini API images: free tier / included in plan
 # Gemini CLI (text): minimal cost for prompt+completion
 OPENROUTER_IMG_COST=$(echo "$IMAGES_VIA_OPENROUTER * $IMG_COST_EACH" | bc 2>/dev/null || echo "0")
-GEMINI_TEXT_COST="~0.005"  # rough estimate for 1 text generation call
+GEMINI_TEXT_COST="~0.01"  # rough estimate for 2 text generation calls
 if [ "$IMAGES_VIA_GEMINI" -gt 0 ]; then
   GEMINI_IMG_NOTE="(included in Google AI plan)"
 else
