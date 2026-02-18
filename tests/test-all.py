@@ -29,7 +29,8 @@ from pathlib import Path
 import requests
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-BASE_URL    = os.environ.get("BASE_URL",    "http://localhost:8000")
+PORT        = os.environ.get("PORT", "8000")
+BASE_URL    = os.environ.get("BASE_URL",    f"http://localhost:{PORT}")
 QUERY       = os.environ.get("QUERY",       "parrucchiere la spezia")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://webhook.site/dummy-test-url")
 BUILD_WAIT  = int(os.environ.get("BUILD_WAIT", "900"))   # seconds

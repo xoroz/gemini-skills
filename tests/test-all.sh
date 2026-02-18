@@ -6,6 +6,7 @@
 #   BASE_URL=http://myserver:8000 ./tests/test-all.sh
 
 export MODE=DEV   # tests always use cheap/fast images
+export PORT="${PORT:-8000}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
