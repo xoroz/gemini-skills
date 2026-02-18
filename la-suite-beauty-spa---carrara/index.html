@@ -1,121 +1,100 @@
-I will activate the `frontend-design` skill to ensure the landing page for La Suite Beauty Spa - Carrara meets high-end design standards.
-I will begin by reading the existing `index.html` in the `la-suite-beauty-spa---carrara/` directory to understand the current state before creating the new high-converting landing page.
-I will now read the contents of `index.html` to see what is already there.
-I will now list the contents of the `assets` directory to verify the presence of the images needed for the landing page.
-I will now list the contents of the root directory to locate the images mentioned in the prompt.
-I will now check the contents of `create.sh` to see if it provides any information about image generation or setup.
-I will activate the `nano-banana-pro` skill to generate the images required for the landing page.
-I will now generate the six required images for the La Suite Beauty Spa landing page using the `nano-banana-pro` skill, ensuring they are saved to the `la-suite-beauty-spa---carrara/assets/` directory with the specified filenames.
-I will check if the `convert` command is available to create placeholder images as a fallback since the image generation quota has been exceeded.
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>La Suite Beauty Spa - Carrara | L'Eccellenza del Benessere</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <title>La Suite Beauty Spa - Carrara | Automotive Excellence</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Font Awesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
 
-    <!-- 1. Header/Nav (Sticky) -->
-    <header class="main-header">
-        <nav class="nav-container">
-            <div class="logo">
-                <a href="#">LA SUITE <span>Beauty Spa</span></a>
-            </div>
-            <ul class="nav-links">
-                <li><a href="#hero">Home</a></li>
-                <li><a href="#services">Servizi</a></li>
-                <li><a href="#gallery">Gallery</a></li>
-                <li><a href="#about">Chi Siamo</a></li>
-                <li><a href="#contact" class="cta-nav">Prenota Ora</a></li>
-            </ul>
-            <div class="mobile-menu-btn">
-                <i class="fas fa-bars"></i>
-            </div>
-        </nav>
+    <!-- 1. Header/Nav -->
+    <header id="header">
+        <div class="container">
+            <nav>
+                <a href="#" class="logo">LA SUITE <span>BEAUTY SPA</span></a>
+                <ul class="nav-links">
+                    <li><a href="#services">Services</a></li>
+                    <li><a href="#gallery">Gallery</a></li>
+                    <li><a href="#about">About</a></li>
+                    <li><a href="#process">Process</a></li>
+                    <li><a href="#contact">Contact</a></li>
+                </ul>
+                <a href="#contact" class="btn btn-nav text-upper" style="padding: 12px 25px; font-size: 0.65rem;">Book Now</a>
+            </nav>
+        </div>
     </header>
 
     <!-- 2. Hero Section -->
-    <section id="hero" class="hero-section">
-        <div class="hero-overlay"></div>
-        <img src="assets/hero-car.png" alt="Ambiente lussuoso e rilassante di La Suite Beauty Spa" class="hero-bg">
-        <div class="hero-content">
-            <h1 class="fade-in">L'Armonia Perfetta tra <br><span>Bellezza e Benessere</span></h1>
-            <p class="fade-in-delayed">Scopri un'oasi di pace nel cuore di Marina di Carrara. Trattamenti esclusivi per rigenerare corpo e mente.</p>
-            <div class="hero-btns fade-in-delayed">
-                <a href="#services" class="btn btn-primary">Esplora i Trattamenti</a>
-                <a href="#contact" class="btn btn-outline">Contattaci</a>
-            </div>
+    <section class="hero">
+        <div class="hero-bg">
+            <img src="assets/hero-car.png" alt="Luxury automotive detailing hero image">
         </div>
-        <div class="scroll-indicator">
-            <div class="mouse"></div>
-            <span>Scorri</span>
+        <div class="container">
+            <div class="hero-content">
+                <p class="text-upper text-gold">Marina di Carrara</p>
+                <h1>The Art of Automotive Rejuvenation</h1>
+                <p>Exquisite beauty treatments for the world's most prestigious automobiles. Experience the fusion of Italian craftsmanship and modern technology.</p>
+                <div class="hero-btns">
+                    <a href="#services" class="btn btn-solid">Our Services</a>
+                    <a href="#gallery" class="btn">View Collection</a>
+                </div>
+            </div>
         </div>
     </section>
 
-    <!-- 3. Services Section -->
-    <section id="services" class="services-section">
-        <div class="section-container">
-            <div class="section-header">
-                <span class="subtitle">Esperienze Sensoriali</span>
-                <h2 class="title">I Nostri Servizi Esclusivi</h2>
-                <div class="divider"></div>
+    <!-- 3. Services/Experiences -->
+    <section id="services" class="services section-padding">
+        <div class="container">
+            <div class="services-header">
+                <p class="text-upper text-gold">Elite Experiences</p>
+                <h2>Signature Treatments</h2>
             </div>
             <div class="services-grid">
                 <div class="service-card">
-                    <div class="service-icon"><i class="fas fa-spa"></i></div>
-                    <h3>Massaggi Olistici</h3>
-                    <p>Rituali di rilassamento profondo con oli essenziali pregiati per liberare le tensioni quotidiane.</p>
+                    <i class="fas fa-magic"></i>
+                    <h3>Ceramic Shield</h3>
+                    <p>Advanced nanotechnology that provides a permanent crystalline barrier against environmental contaminants and UV damage.</p>
+                    <a href="#contact" class="service-link text-upper">Enquire <i class="fas fa-arrow-right"></i></a>
                 </div>
                 <div class="service-card">
-                    <div class="service-icon"><i class="fas fa-magic"></i></div>
-                    <h3>Trattamenti Viso</h3>
-                    <p>Protocolli avanzati di skincare per donare luminosità, idratazione e una nuova giovinezza alla tua pelle.</p>
+                    <i class="fas fa-spray-can-sparkles"></i>
+                    <h3>Diamond Detail</h3>
+                    <p>A multi-stage correction process that removes imperfections and restores the original mirror-like clarity of your paintwork.</p>
+                    <a href="#contact" class="service-link text-upper">Enquire <i class="fas fa-arrow-right"></i></a>
                 </div>
                 <div class="service-card">
-                    <div class="service-icon"><i class="fas fa-gem"></i></div>
-                    <h3>Rituali Corpo</h3>
-                    <p>Scrub rigeneranti e impacchi nutrienti ispirati alla natura per una pelle vellutata e detossinata.</p>
-                </div>
-                <div class="service-card">
-                    <div class="service-icon"><i class="fas fa-hand-holding-heart"></i></div>
-                    <h3>Percorsi Benessere</h3>
-                    <p>Esperienze complete studiate su misura per rigenerare ogni senso in un ambiente di assoluto prestigio.</p>
+                    <i class="fas fa-couch"></i>
+                    <h3>Interior Atelier</h3>
+                    <p>Meticulous restoration of fine leathers, alcantara, and exotic wood trims using traditional Carrara artisan techniques.</p>
+                    <a href="#contact" class="service-link text-upper">Enquire <i class="fas fa-arrow-right"></i></a>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- 4. Recent Work/Gallery -->
-    <section id="gallery" class="gallery-section">
-        <div class="section-container">
-            <div class="section-header">
-                <span class="subtitle">L'Essenza della Bellezza</span>
-                <h2 class="title">Istantanee di Relax</h2>
-                <div class="divider"></div>
+    <section id="gallery" class="gallery section-padding">
+        <div class="container">
+            <div class="services-header">
+                <p class="text-upper text-gold">Recent Masterpieces</p>
+                <h2>The Carrara Collection</h2>
             </div>
             <div class="gallery-grid">
-                <div class="gallery-item large">
-                    <img src="assets/gallery-mustang.png" alt="Trattamento viso rilassante di alta qualità">
+                <div class="gallery-item">
+                    <img src="assets/gallery-mustang.png" alt="Restored classic Mustang detail">
                     <div class="gallery-overlay">
-                        <span>Trattamenti Viso</span>
+                        <p class="text-upper">Performance Restoration</p>
+                        <h3>Heritage Mustang</h3>
                     </div>
                 </div>
                 <div class="gallery-item">
-                    <img src="assets/gallery-jaguar.png" alt="Reception elegante e accogliente di La Suite">
+                    <img src="assets/gallery-jaguar.png" alt="Polished luxury Jaguar front profile">
                     <div class="gallery-overlay">
-                        <span>L'Accoglienza</span>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/interior-detail.png" alt="Dettaglio di oli essenziali e prodotti spa">
-                    <div class="gallery-overlay">
-                        <span>Dettagli di Lusso</span>
+                        <p class="text-upper">Gloss Enhancement</p>
+                        <h3>Jaguar Sovereign</h3>
                     </div>
                 </div>
             </div>
@@ -123,176 +102,130 @@ I will check if the `convert` command is available to create placeholder images 
     </section>
 
     <!-- 5. About/History -->
-    <section id="about" class="about-section">
-        <div class="section-container">
-            <div class="about-content">
+    <section id="about" class="about section-padding">
+        <div class="container">
+            <div class="about-grid">
                 <div class="about-image">
-                    <img src="assets/workshop.png" alt="Il nostro centro benessere a Marina di Carrara">
-                    <div class="experience-badge">
-                        <span class="years">10+</span>
-                        <span class="text">Anni di Eccellenza</span>
-                    </div>
+                    <img src="assets/workshop.png" alt="Our high-end automotive spa workshop in Carrara">
                 </div>
-                <div class="about-text">
-                    <span class="subtitle">La Nostra Storia</span>
-                    <h2 class="title">La Suite: Dove la Passione Incontra la Perfezione</h2>
-                    <p>Nata dal desiderio di creare uno spazio unico a Marina di Carrara, La Suite Beauty Spa non è solo un centro estetico, ma una destinazione dedicata alla cura totale della persona.</p>
-                    <p>Il nostro team di professioniste esperte seleziona i migliori prodotti e le tecnologie più avanzate per garantirti risultati visibili in un'atmosfera di totale riservatezza e relax.</p>
-                    <ul class="about-features">
-                        <li><i class="fas fa-check"></i> Personale altamente qualificato</li>
-                        <li><i class="fas fa-check"></i> Prodotti premium e naturali</li>
-                        <li><i class="fas fa-check"></i> Protocolli personalizzati</li>
-                    </ul>
+                <div class="about-content">
+                    <p class="text-upper text-gold">Our Legacy</p>
+                    <h2>Crafted in the Heart of Carrara</h2>
+                    <p>Founded on the principles of precision and patience, La Suite Beauty Spa brings the same level of care to automotive surfaces that Carrara's master sculptors bring to marble.</p>
+                    <p>Our workshop is a sanctuary where technology meets tradition, ensuring every vehicle that leaves our suite is a testament to automotive perfection.</p>
+                    <a href="#contact" class="btn">Discover Our Story</a>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- 6. Our Process -->
-    <section id="process" class="process-section">
-        <div class="section-container">
-            <div class="section-header">
-                <span class="subtitle">Come Lavoriamo</span>
-                <h2 class="title">Il Tuo Viaggio verso il Benessere</h2>
-                <div class="divider"></div>
+    <section id="process" class="process section-padding">
+        <div class="container">
+            <div class="services-header">
+                <p class="text-upper text-gold">The Methodology</p>
+                <h2>Precision Workflow</h2>
             </div>
-            <div class="process-grid">
-                <div class="process-step">
-                    <div class="step-number">01</div>
-                    <h3>Consulenza</h3>
-                    <p>Iniziamo con un'analisi attenta delle tue necessità per creare un percorso su misura.</p>
+            <div class="process-steps">
+                <div class="step-card">
+                    <div class="step-num">01</div>
+                    <h3>Consultation</h3>
+                    <p>Detailed analysis of the vehicle's condition and client goals.</p>
                 </div>
-                <div class="process-step">
-                    <img src="assets/restoration-process.png" alt="Fase di trattamento professionale" class="step-image">
-                    <div class="step-number">02</div>
-                    <h3>Trattamento</h3>
-                    <p>Mani esperte e tecniche d'avanguardia per un'esperienza indimenticabile.</p>
+                <div class="step-card">
+                    <div class="step-num">02</div>
+                    <h3>Decontamination</h3>
+                    <p>Removal of all surface impurities using specialized solvents.</p>
                 </div>
-                <div class="process-step">
-                    <div class="step-number">03</div>
-                    <h3>Risultato</h3>
-                    <p>Esci dalla Suite rigenerata, con una nuova energia e una bellezza ritrovata.</p>
+                <div class="step-card">
+                    <div class="step-num">03</div>
+                    <h3>Transformation</h3>
+                    <p>Using the techniques shown in our <span>restoration process</span>.</p>
+                    <div style="margin-top:20px;"><img src="assets/restoration-process.png" alt="Technician performing paint correction" style="width:100%; border: 1px solid rgba(197,160,89,0.3);"></div>
+                </div>
+                <div class="step-card">
+                    <div class="step-num">04</div>
+                    <h3>Validation</h3>
+                    <p>Final inspection under high-intensity lighting to ensure perfection.</p>
+                    <div style="margin-top:20px;"><img src="assets/interior-detail.png" alt="Macro detail of leather stitching" style="width:100%; border: 1px solid rgba(197,160,89,0.3);"></div>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- 7. Testimonials -->
-    <section id="testimonials" class="testimonials-section">
-        <div class="section-container">
-            <div class="section-header">
-                <span class="subtitle">Dicono di Noi</span>
-                <h2 class="title">Le Esperienze dei Nostri Clienti</h2>
-                <div class="divider"></div>
-            </div>
-            <div class="testimonials-slider">
-                <div class="testimonial-card">
-                    <div class="stars">
-                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
-                    </div>
-                    <p>"Un'esperienza meravigliosa. La Suite è davvero un paradiso nel cuore di Carrara. Il massaggio è stato il migliore che abbia mai ricevuto."</p>
-                    <span class="client-name">- Elena R.</span>
-                </div>
-                <div class="testimonial-card">
-                    <div class="stars">
-                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
-                    </div>
-                    <p>"Professionalità e pulizia impeccabili. Ho fatto un trattamento viso e i risultati sono stati incredibili fin da subito. Consigliatissimo!"</p>
-                    <span class="client-name">- Marco T.</span>
-                </div>
+    <section class="testimonials section-padding">
+        <div class="container">
+            <div class="testimonial-card">
+                <p class="text-upper text-gold" style="margin-bottom: 20px;">Client Voices</p>
+                <blockquote>"The attention to detail at La Suite is unparalleled. They didn't just clean my car; they restored its soul. It's the only place I trust with my collection."</blockquote>
+                <p class="text-upper" style="font-weight: 600;">— Alessandro V., Ferrari Collector</p>
             </div>
         </div>
     </section>
 
     <!-- 8. Contact Info with Form -->
-    <section id="contact" class="contact-section">
-        <div class="section-container">
-            <div class="contact-wrapper">
+    <section id="contact" class="contact section-padding">
+        <div class="container">
+            <div class="contact-grid">
                 <div class="contact-info">
-                    <h2 class="title">Inizia la Tua <br>Trasformazione</h2>
-                    <p>Contattaci per prenotare il tuo appuntamento o per richiedere una consulenza personalizzata.</p>
-                    <ul class="contact-details">
-                        <li>
-                            <i class="fas fa-map-marker-alt"></i>
-                            <div>
-                                <strong>Indirizzo</strong>
-                                <p>Via Werther Muttini, 5-8, 54033 Marina di Carrara MS</p>
-                            </div>
-                        </li>
-                        <li>
-                            <i class="fas fa-phone-alt"></i>
-                            <div>
-                                <strong>Telefono</strong>
-                                <p><a href="tel:3342380921">3342380921</a></p>
-                            </div>
-                        </li>
-                        <li>
-                            <i class="fas fa-clock"></i>
-                            <div>
-                                <strong>Orari</strong>
-                                <p>Lun - Sab: 09:00 - 19:30</p>
-                            </div>
-                        </li>
-                    </ul>
-                    <div class="social-links">
-                        <a href="#"><i class="fab fa-facebook-f"></i></a>
-                        <a href="#"><i class="fab fa-instagram"></i></a>
+                    <p class="text-upper text-gold">Get in Touch</p>
+                    <h2>Secure Your Appointment</h2>
+                    <div class="contact-item">
+                        <h4>Location</h4>
+                        <p>Via Werther Muttini, 5-8,<br>54033 Marina di Carrara MS</p>
+                    </div>
+                    <div class="contact-item">
+                        <h4>Call Us</h4>
+                        <p>+39 334 238 0921</p>
+                    </div>
+                    <div class="contact-item">
+                        <h4>Socials</h4>
+                        <div style="display: flex; gap: 20px; font-size: 1.5rem; margin-top: 10px;">
+                            <a href="#"><i class="fab fa-instagram"></i></a>
+                            <a href="#"><i class="fab fa-facebook"></i></a>
+                        </div>
                     </div>
                 </div>
-                <div class="contact-form-container">
-                    <form action="#" method="POST" class="contact-form">
-                        <div class="form-group">
-                            <input type="text" placeholder="Il Tuo Nome" required>
-                        </div>
-                        <div class="form-group">
-                            <input type="email" placeholder="La Tua Email" required>
-                        </div>
-                        <div class="form-group">
-                            <select required>
-                                <option value="" disabled selected>Servizio di interesse</option>
-                                <option value="massaggio">Massaggi</option>
-                                <option value="viso">Trattamenti Viso</option>
-                                <option value="corpo">Trattamenti Corpo</option>
-                                <option value="altro">Altro</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <textarea placeholder="Il Tuo Messaggio" rows="5"></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-primary full-width">Invia Richiesta</button>
-                    </form>
-                </div>
+                <form class="contact-form">
+                    <div class="form-group">
+                        <input type="text" placeholder="Your Full Name" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="email" placeholder="Email Address" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" placeholder="Vehicle Model & Year">
+                    </div>
+                    <div class="form-group">
+                        <textarea placeholder="How can we help you?"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-solid" style="width: 100%;">Request Consultation</button>
+                </form>
             </div>
         </div>
     </section>
 
     <!-- 9. Footer -->
-    <footer class="main-footer">
-        <div class="section-container">
-            <div class="footer-bottom">
-                <p>&copy; 2026 La Suite Beauty Spa - Carrara. Tutti i diritti riservati.</p>
-                <ul class="footer-links">
-                    <li><a href="#">Privacy Policy</a></li>
-                    <li><a href="#">Termini e Condizioni</a></li>
-                </ul>
+    <footer>
+        <div class="container">
+            <div class="footer-logo">
+                <a href="#" class="logo">LA SUITE <span>BEAUTY SPA</span></a>
             </div>
+            <div class="footer-socials">
+                <a href="#"><i class="fab fa-instagram"></i></a>
+                <a href="#"><i class="fab fa-facebook-f"></i></a>
+                <a href="#"><i class="fab fa-twitter"></i></a>
+                <a href="#"><i class="fab fa-linkedin-in"></i></a>
+            </div>
+            <p class="copyright">&copy; 2026 LA SUITE BEAUTY SPA - CARRARA. ALL RIGHTS RESERVED.</p>
         </div>
     </footer>
 
     <script>
-        // Smooth scrolling for navigation links
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                document.querySelector(this.getAttribute('href')).scrollIntoView({
-                    behavior: 'smooth'
-                });
-            });
-        });
-
-        // Header scroll effect
-        window.addEventListener('scroll', function() {
-            const header = document.querySelector('.main-header');
+        // Simple header scroll effect
+        window.addEventListener('scroll', () => {
+            const header = document.getElementById('header');
             if (window.scrollY > 50) {
                 header.classList.add('scrolled');
             } else {
