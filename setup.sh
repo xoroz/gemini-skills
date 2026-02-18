@@ -266,8 +266,8 @@ echo "Generating $SERVICE_FILE..."
 # 1. venv/bin (first priority)
 # 2. ~/.local/bin (for uv)
 # 3. ~/.npm-global/bin (for gemini CLI via npm)
-# 4. /usr/bin, /bin locally
-SERVICE_PATH="$CURRENT_DIR/venv/bin:$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+# 4. Current user PATH (captures NVM, etc.)
+SERVICE_PATH="$CURRENT_DIR/venv/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
 
 cat > $SERVICE_FILE <<EOF
 [Unit]
