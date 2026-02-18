@@ -11,14 +11,18 @@
 Generate images using Google's Gemini 2.5 Flash (Nano Banana Pro).
 
 Supports two providers:
-  1. Google GenAI (GEMINI_API_KEY) - primary
-  2. OpenRouter (OPENROUTER_API_KEY) - fallback
+  1. OpenRouter (OPENROUTER_API_KEY) - default/primary  (more reliable)
+  2. Google GenAI (GEMINI_API_KEY)   - fallback
+
+OpenRouter model options:
+  google/gemini-2.5-flash-image   — best quality  (~$0.030/img)  [PROD default]
+  sourceful/riverflow-v2-fast     — cheap & fast   (~$0.003/img)  [DEV default]
 
 Usage:
     uv run image.py --prompt "A colorful abstract pattern" --output "./hero.png"
-    uv run image.py --prompt "Minimalist icon" --output "./icon.png" --aspect landscape
     uv run image.py --prompt "Quick draft" --output "./draft.png" --quality draft
-    uv run image.py --prompt "Force openrouter" --output "./img.png" --provider openrouter
+    uv run image.py --prompt "Cheap dev run" --output "./img.png" --model sourceful/riverflow-v2-fast
+    uv run image.py --prompt "Force gemini" --output "./img.png" --provider gemini
 """
 
 import argparse
@@ -31,6 +35,14 @@ import requests as http_requests
 from google import genai
 from PIL import Image
 
+# ---------------------------------------------------------------------------
+# Pricing table (USD per image) — update when OpenRouter changes rates
+# ---------------------------------------------------------------------------
+MODEL_PRICING = {
+    "google/gemini-2.5-flash-image": 0.038,   # PROD quality
+    "black-forest-labs/flux.2-klein-4b":   0.014,   # DEV / cheap
+}
+DEFAULT_OPENROUTER_MODEL = "google/gemini-2.5-flash-image"
 
 def get_aspect_instruction(aspect: str) -> str:
     """Return aspect ratio instruction for the prompt."""
@@ -102,13 +114,16 @@ def generate_with_gemini(
 
 def generate_with_openrouter(
     prompt: str, output_path: str, aspect: str = "square",
-    quality: str = "high",
+    quality: str = "high", model: str = DEFAULT_OPENROUTER_MODEL,
 ) -> bool:
-    """Generate image using OpenRouter API as fallback. Returns True on success."""
+    """Generate image using OpenRouter API. Returns True on success."""
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         print("  [openrouter] OPENROUTER_API_KEY not set, skipping.", file=sys.stderr)
         return False
+
+    price = MODEL_PRICING.get(model, "?")
+    print(f"  [openrouter] model={model}  price=~${price}/img")
 
     try:
         aspect_instruction = get_aspect_instruction(aspect)
@@ -123,15 +138,10 @@ def generate_with_openrouter(
                 "X-Title": "Nano Banana Pro",
             },
             data=json.dumps({
-                "model": "google/gemini-2.5-flash-image",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": full_prompt,
-                    }
-                ],
+                "model": model,
+                "messages": [{"role": "user", "content": full_prompt}],
             }),
-            timeout=120,
+            timeout=60,   # 60 s — if it hasn't responded by then, something is wrong
         )
 
         if response.status_code != 200:
@@ -202,29 +212,24 @@ def generate_with_openrouter(
 def generate_image(
     prompt: str, output_path: str, aspect: str = "square",
     quality: str = "high", reference: str | None = None,
-    provider: str = "auto",
+    provider: str = "auto", model: str = DEFAULT_OPENROUTER_MODEL,
 ) -> None:
-    """Generate image with automatic fallback between providers."""
-    # Ensure output directory exists
+    """Generate image — OpenRouter first by default (more reliable than Gemini API)."""
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    providers = {
-        "gemini": [generate_with_gemini],
-        "openrouter": [generate_with_openrouter],
-        "auto": [generate_with_gemini, generate_with_openrouter],
-    }
+    # auto = OpenRouter first, then Gemini as fallback
+    if provider == "auto":
+        provider_list = ["openrouter", "gemini"]
+    else:
+        provider_list = [provider]
 
-    provider_list = providers.get(provider, providers["auto"])
-
-    for gen_fn in provider_list:
-        if gen_fn == generate_with_openrouter:
-            # OpenRouter doesn't support reference images via this method
-            success = gen_fn(prompt, output_path, aspect, quality)
+    for prov in provider_list:
+        if prov == "openrouter":
+            success = generate_with_openrouter(prompt, output_path, aspect, quality, model)
         else:
-            success = gen_fn(prompt, output_path, aspect, quality, reference)
-
+            success = generate_with_gemini(prompt, output_path, aspect, quality, reference)
         if success:
             return
 
@@ -236,16 +241,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate images using Gemini 2.5 Flash (Nano Banana Pro)"
     )
-    parser.add_argument(
-        "--prompt",
-        required=True,
-        help="Description of the image to generate",
-    )
-    parser.add_argument(
-        "--output",
-        required=True,
-        help="Output file path (PNG format)",
-    )
+    parser.add_argument("--prompt",    required=True, help="Description of the image to generate")
+    parser.add_argument("--output",    required=True, help="Output file path (PNG format)")
     parser.add_argument(
         "--aspect",
         choices=["square", "landscape", "portrait"],
@@ -256,23 +253,32 @@ def main():
         "--quality",
         choices=["high", "draft"],
         default="high",
-        help="Image quality: 'high' for production, 'draft' for quick mockups (default: high)",
+        help="Image quality: 'high' for production, 'draft' for mockups (default: high)",
     )
     parser.add_argument(
         "--reference",
-        help="Path to a reference image for style/composition guidance (optional, Gemini only)",
+        help="Path to a reference image (optional, Gemini only)",
     )
     parser.add_argument(
         "--provider",
         choices=["auto", "gemini", "openrouter"],
         default="auto",
-        help="Provider to use: 'auto' tries Gemini then OpenRouter, or force one (default: auto)",
+        help="Provider: 'auto' tries OpenRouter then Gemini (default: auto)",
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_OPENROUTER_MODEL,
+        help=(
+            f"OpenRouter model to use (default: {DEFAULT_OPENROUTER_MODEL}). "
+            "Examples: sourceful/riverflow-v2-fast (cheap/dev), "
+            "google/gemini-2.5-flash-image (prod)"
+        ),
     )
 
     args = parser.parse_args()
     generate_image(
         args.prompt, args.output, args.aspect,
-        args.quality, args.reference, args.provider,
+        args.quality, args.reference, args.provider, args.model,
     )
 
 

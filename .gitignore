@@ -1,15 +1,43 @@
-# Claude Code local settings
+# ── Gemini / Claude local settings ──────────────────────────────────────────
 .claude/
+.gemini/
 
-# Python
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.pyd
+.Python
 .venv/
 venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Generated sites
+# ── uv ───────────────────────────────────────────────────────────────────────
+.uv/
+uv.lock
+
+# ── Generated sites (output of create.sh / API) ───────────────────────────────
 sites/
 
-# OS
+# ── Test artefacts ────────────────────────────────────────────────────────────
+test_shot.png
+*.png
+!skills/**/*.png
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo

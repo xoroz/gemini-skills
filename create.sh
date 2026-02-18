@@ -2,13 +2,29 @@
 
 # Usage: ./create.sh "Business Name" "Niche" "Address" "Contact Info"
 # Language: Set SITE_LANG=en before running to generate in English (default: it)
+# Mode:     Set MODE=DEV for cheap/fast images (riverflow), MODE=PROD for quality (default: PROD)
 #
 # Examples:
 #   ./create.sh "Officina Mario" "riparazione auto" "Via Roma 42, Milano" "+39 02 1234567"
 #   SITE_LANG=en ./create.sh "Joe's Garage" "auto repair" "123 Main St" "555-1234"
+#   MODE=DEV ./create.sh "Test Salon" "parrucchiere" "Via Test 1" "+39 000"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 IMAGE_SCRIPT="$SCRIPT_DIR/skills/nano-banana-pro/scripts/image.py"
+
+# =============================================================================
+# IMAGE MODEL & PRICING — edit these when rates change
+# =============================================================================
+#MODE="${MODE:-PROD}"   # DEV = cheap/fast,  PROD = quality
+MODE="DEV"
+if [ "$MODE" = "DEV" ]; then
+  IMG_MODEL="black-forest-labs/flux.2-klein-4b"
+  IMG_COST_EACH=0.014
+else
+  IMG_MODEL="google/gemini-2.5-flash-image"
+  IMG_COST_EACH=0.038   # ~$0.030/img via OpenRouter
+fi
+# =============================================================================
 
 # 1. READ INPUTS
 BUSINESS_NAME="$1"
@@ -107,10 +123,11 @@ IMAGES_GENERATED=0
 IMAGES_FAILED=0
 IMAGES_VIA_GEMINI=0
 IMAGES_VIA_OPENROUTER=0
-IMG_COST_EACH=0.03  # OpenRouter cost per image
+# IMG_COST_EACH is set above in the MODEL & PRICING block
 
 # 5. GENERATE LOCAL IMAGES WITH NANO-BANANA-PRO
 echo "🎨 Generating images with Nano Banana Pro..."
+echo "   Mode: $MODE  |  Model: $IMG_MODEL  |  ~\$${IMG_COST_EACH}/img"
 echo ""
 
 declare -A IMAGES
@@ -132,18 +149,19 @@ for IMG_NAME in "${!IMAGES[@]}"; do
   echo "  🖼️  [$IMG_COUNT/$IMG_TOTAL] Generating: assets/${IMG_NAME}.png"
   
   # Retry loop with exponential backoff for rate limits
-  MAX_RETRIES=3
+  MAX_RETRIES=2
   RETRY=0
   SUCCESS=false
-  
+
   while [ $RETRY -le $MAX_RETRIES ]; do
     OUTPUT=$(uv run "$IMAGE_SCRIPT" \
       --prompt "$IMG_PROMPT" \
       --output "$IMG_PATH" \
       --aspect landscape \
-      --quality draft 2>&1)
+      --quality draft \
+      --model "$IMG_MODEL" 2>&1)
     EXIT_CODE=$?
-    
+
     if [ $EXIT_CODE -eq 0 ]; then
       echo "$OUTPUT" | sed 's/^/     /'
       SUCCESS=true
@@ -156,12 +174,12 @@ for IMG_NAME in "${!IMAGES[@]}"; do
       fi
       break
     fi
-    
+
     # Check if it's a rate limit error (429)
     if echo "$OUTPUT" | grep -q "429\|RESOURCE_EXHAUSTED\|rate"; then
       RETRY=$((RETRY + 1))
       if [ $RETRY -le $MAX_RETRIES ]; then
-        WAIT=$((30 * RETRY))  # 30s, 60s, 90s backoff
+        WAIT=$((30 * RETRY))  # 30s, 60s backoff
         echo "     ⏳ Rate limited. Waiting ${WAIT}s before retry $RETRY/$MAX_RETRIES..."
         sleep $WAIT
       else
@@ -179,9 +197,9 @@ for IMG_NAME in "${!IMAGES[@]}"; do
     IMAGES_FAILED=$((IMAGES_FAILED + 1))
     echo "  ⚠️  Warning: Could not generate ${IMG_NAME}.png, continuing..."
   fi
-  
-  # Delay between requests to avoid hitting rate limits
-  if [ $IMG_COUNT -lt $IMG_TOTAL ]; then
+
+  # Delay between requests (skip in DEV mode — cheap model has no rate limit concerns)
+  if [ $IMG_COUNT -lt $IMG_TOTAL ] && [ "$MODE" != "DEV" ]; then
     echo "     ⏱️  Waiting 10s before next image (rate limit protection)..."
     sleep 10
   fi
@@ -253,8 +271,70 @@ Do NOT say what you are going to do. Just output the raw HTML directly.
 - Do not output markdown code blocks. Just raw HTML code.
 "
 
+# Function to generate text with retry logic for rate limits
+generate_text_with_retry() {
+  local prompt="$1"
+  local output_file="$2"
+  local label="$3"
+  local max_retries=3
+  local retry=0
+  local success=false
+
+  while [ $retry -le $max_retries ]; do
+    # Create temp file for stderr to catch errors without mixing with stdout
+    local err_file
+    err_file=$(mktemp)
+
+    # Run gemini, redirecting stderr to temp file
+    if echo "$prompt" | gemini -y -p "" > "$output_file" 2> "$err_file"; then
+      # Success? Check if the file is empty (sometimes gemini fails silently)
+      if [ -s "$output_file" ]; then
+        success=true
+        rm -f "$err_file"
+        break
+      else
+        echo "Output file was empty (silent failure)" >> "$err_file"
+      fi
+    fi
+
+    # Read error
+    local err_content
+    err_content=$(cat "$err_file")
+    rm -f "$err_file"
+
+    retry=$((retry + 1))
+    if [ $retry -gt $max_retries ]; then
+        echo "     ❌ ${label}: Failed after $max_retries retries."
+        echo "Error details: $err_content" >> "$LOG_FILE"
+        return 1
+    fi
+
+    # Check for quota/rate limit errors
+    if echo "$err_content" | grep -q "MODEL_CAPACITY_EXHAUSTED\|429\|RESOURCE_EXHAUSTED"; then
+        local wait=$((60 * retry))  # 60s, 120s, 180s
+        echo "     ⏳ ${label}: Rate limited (Capacity Exhausted). Waiting ${wait}s before retry $retry/$max_retries..."
+        sleep $wait
+    else
+        # Generic error (network blip, empty response, etc)
+        echo "     ⚠️  ${label}: Error encountered. Retrying in 10s... ($retry/$max_retries)"
+        # Log incident but keep going
+        echo "[WARN] Retry $retry for $label: $err_content" >> "$LOG_FILE"
+        sleep 10
+    fi
+  done
+
+  if [ "$success" = true ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 echo "🔨 Generating index.html ($LANG_NAME)..."
-echo "$PROMPT" | gemini -y -p "" > "$FOLDER_NAME/index.html" 2>> "$LOG_FILE"
+if ! generate_text_with_retry "$PROMPT" "$FOLDER_NAME/index.html" "HTML"; then
+  echo "❌ Failed to generate HTML. See build.log."
+  exit 1
+fi
 
 # Strip any AI preamble before <!DOCTYPE
 if ! head -1 "$FOLDER_NAME/index.html" | grep -q "<!DOCTYPE"; then
@@ -262,7 +342,8 @@ if ! head -1 "$FOLDER_NAME/index.html" | grep -q "<!DOCTYPE"; then
 fi
 
 HTML_SIZE=$(wc -c < "$FOLDER_NAME/index.html" 2>/dev/null || echo 0)
-echo "✅ index.html created! ($(numfmt --to=iec $HTML_SIZE 2>/dev/null || echo "${HTML_SIZE}B"))"
+HTML_SIZE_STR=$(numfmt --to=iec "$HTML_SIZE" 2>/dev/null || echo "${HTML_SIZE}B")
+echo "✅ index.html created! ($HTML_SIZE_STR)"
 
 # 7. GENERATE CSS (fed with actual HTML for class name matching)
 GENERATED_HTML=$(cat "$FOLDER_NAME/index.html")
@@ -297,7 +378,10 @@ $GENERATED_HTML
 "
 
 echo "🎨 Generating style.css..."
-echo "$CSS_PROMPT" | gemini -y -p "" > "$FOLDER_NAME/style.css" 2>> "$LOG_FILE"
+if ! generate_text_with_retry "$CSS_PROMPT" "$FOLDER_NAME/style.css" "CSS"; then
+  echo "❌ Failed to generate CSS. See build.log."
+  exit 1
+fi
 
 # Strip any AI preamble before actual CSS
 if ! head -1 "$FOLDER_NAME/style.css" | grep -qE "^[@:\/\*\.]"; then
@@ -305,7 +389,8 @@ if ! head -1 "$FOLDER_NAME/style.css" | grep -qE "^[@:\/\*\.]"; then
 fi
 
 CSS_SIZE=$(wc -c < "$FOLDER_NAME/style.css" 2>/dev/null || echo 0)
-echo "✅ style.css created! ($(numfmt --to=iec $CSS_SIZE 2>/dev/null || echo "${CSS_SIZE}B"))"
+CSS_SIZE_STR=$(numfmt --to=iec "$CSS_SIZE" 2>/dev/null || echo "${CSS_SIZE}B")
+echo "✅ style.css created! ($CSS_SIZE_STR)"
 
 # 8. CALCULATE STATS
 END_TIME=$(date +%s)
@@ -336,6 +421,7 @@ echo "════════════════════════�
 echo ""
 echo "  ⏱️  Total time:    ${MINUTES}m ${SECONDS}s"
 echo "  🌐 Language:      $LANG_NAME ($SITE_LANG)"
+echo "  🏗️  Mode:          $MODE  ($IMG_MODEL)"
 echo ""
 echo "  🖼️  Images:"
 echo "     Generated:     $IMAGES_GENERATED / $IMG_TOTAL"
