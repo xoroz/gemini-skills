@@ -9,7 +9,7 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
-PORT=8000
+PORT=${PORT:-8000}
 
 echo -e "${GREEN}Starting Auto Sites Service Setup...${NC}"
 
@@ -177,12 +177,59 @@ else
     echo -e "${YELLOW}Skipping extension installation (gemini CLI missing).${NC}"
 fi
 
-# 8. Setup Systemd Service
-echo -e "${YELLOW}[8/9] Setting up Systemd Service...${NC}"
+# 8. Configure API Keys
+echo -e "${YELLOW}[8/9] Configuring API Keys...${NC}"
+
+if [ -z "$GEMINI_API_KEY" ]; then
+    # Try to verify if it's already in .bashrc but not exported to this shell
+    if grep -q "GEMINI_API_KEY" "$HOME/.bashrc"; then
+         echo "Found GEMINI_API_KEY in .bashrc..."
+         # We won't source it automatically to avoid side effects, but we'll ask the user.
+    fi
+
+    echo -e "${RED}GEMINI_API_KEY is not set in the current session.${NC}"
+    echo "The service needs this key to function."
+    read -p "Enter your Gemini API Key: " INPUT_KEY
+    if [ ! -z "$INPUT_KEY" ]; then
+        export GEMINI_API_KEY="$INPUT_KEY"
+        
+        # Ask to save to .bashrc if not there
+        if ! grep -q "GEMINI_API_KEY" "$HOME/.bashrc"; then
+            read -p "Add to ~/.bashrc for future sessions? (y/n) " ADD_RC
+            if [[ "$ADD_RC" == "y" ]]; then
+                echo "" >> "$HOME/.bashrc"
+                echo "export GEMINI_API_KEY=\"$INPUT_KEY\"" >> "$HOME/.bashrc"
+                echo "Added to ~/.bashrc"
+            fi
+        fi
+    fi
+else
+    echo "✅ GEMINI_API_KEY is set."
+fi
+
+# Optional: OpenRouter
+if [ -z "$OPENROUTER_API_KEY" ]; then
+    # Silent check, only prompt if Gemini is missing? 
+    # Or just let the user know they can set it.
+    if [ -z "$GEMINI_API_KEY" ]; then
+        echo -e "${YELLOW}Gemini Key is missing. You can provide an OPENROUTER_API_KEY instead.${NC}"
+        read -p "Enter OpenRouter API Key: " OR_KEY
+        if [ ! -z "$OR_KEY" ]; then
+            export OPENROUTER_API_KEY="$OR_KEY"
+             if ! grep -q "OPENROUTER_API_KEY" "$HOME/.bashrc"; then
+                echo "export OPENROUTER_API_KEY=\"$OR_KEY\"" >> "$HOME/.bashrc"
+            fi
+        fi
+    fi
+fi
+
+# 9. Setup Systemd Service
+echo -e "${YELLOW}[9/9] Setting up Systemd Service...${NC}"
 
 CURRENT_USER=$(whoami)
 CURRENT_DIR=$(pwd)
 SERVICE_FILE="auto-sites.service"
+ENV_FILE="$CURRENT_DIR/.env"
 
 # Check if port is in use
 if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
@@ -200,7 +247,27 @@ if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
     fi
 fi
 
+echo "Generating $ENV_FILE..."
+# Create/Update .env file
+echo "PORT=$PORT" > "$ENV_FILE"
+if [ ! -z "$GEMINI_API_KEY" ]; then
+    echo "GEMINI_API_KEY=\"$GEMINI_API_KEY\"" >> "$ENV_FILE"
+fi
+if [ ! -z "$OPENROUTER_API_KEY" ]; then
+    echo "OPENROUTER_API_KEY=\"$OPENROUTER_API_KEY\"" >> "$ENV_FILE"
+fi
+chmod 600 "$ENV_FILE"
+# Add explicit PATH to .env just in case, though usually better in service file.
+# We will rely on EnvironmentFile for keys and Environment for PATH in the service file.
+
 echo "Generating $SERVICE_FILE..."
+
+# Construct the PATH to include:
+# 1. venv/bin (first priority)
+# 2. ~/.local/bin (for uv)
+# 3. ~/.npm-global/bin (for gemini CLI via npm)
+# 4. /usr/bin, /bin locally
+SERVICE_PATH="$CURRENT_DIR/venv/bin:$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
 
 cat > $SERVICE_FILE <<EOF
 [Unit]
@@ -212,7 +279,8 @@ Wants=network-online.target
 Type=simple
 User=$CURRENT_USER
 WorkingDirectory=$CURRENT_DIR
-Environment="PORT=$PORT"
+EnvironmentFile=$ENV_FILE
+Environment="PATH=$SERVICE_PATH"
 ExecStart=$CURRENT_DIR/venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT
 Restart=always
 RestartSec=3
@@ -233,28 +301,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now auto-sites.service
 
 echo -e "${GREEN}Service installed and started!${NC}"
-sudo systemctl status auto-sites.service --no-pager | head -n 10
+sudo systemctl status auto-sites.service --no-pager | head -n 12
 
-# 9. Environment Variables and Tests
-echo -e "${YELLOW}[9/9] Configuration and Testing...${NC}"
+# 10. Final Verification
+echo -e "${YELLOW}[Verification] Running Tests...${NC}"
 
-if [ -z "$GEMINI_API_KEY" ]; then
-    echo -e "${RED}GEMINI_API_KEY is not set.${NC}"
-    read -p "Enter your Gemini API Key: " INPUT_KEY
-    if [ ! -z "$INPUT_KEY" ]; then
-        export GEMINI_API_KEY="$INPUT_KEY"
-        # Offer to save to bashrc
-        read -p "Add to ~/.bashrc? (y/n) " ADD_RC
-        if [[ "$ADD_RC" == "y" ]]; then
-            echo "export GEMINI_API_KEY=\"$INPUT_KEY\"" >> ~/.bashrc
-            echo "Added to ~/.bashrc"
-        fi
-    fi
-else
-    echo "GEMINI_API_KEY is detected."
-fi
-
-# Testing
 echo "Perform a test run? (This runs test-playwright.py)"
 read -p "Run test? (y/n) " RUN_TEST
 
@@ -263,5 +314,6 @@ if [[ "$RUN_TEST" == "y" ]]; then
 fi
 
 echo -e "${GREEN}Setup Complete!${NC}"
-echo "You can check service status with: systemctl status auto-sites.service"
-echo "API is running on port $PORT."
+echo "Service is running on Port $PORT"
+echo "Check status: systemctl status auto-sites.service"
+
