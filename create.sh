@@ -10,6 +10,7 @@
 #   MODE=DEV ./create.sh "Test Salon" "parrucchiere" "Via Test 1" "+39 000"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 IMAGE_SCRIPT="$SCRIPT_DIR/skills/nano-banana-pro/scripts/image.py"
 
 # =============================================================================

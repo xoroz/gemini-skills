@@ -1,4 +1,6 @@
-# Gemini Skills & Review Site Factory
+# Gemini Skills
+<!-- Test update for git sync verification -->
+ & Review Site Factory
 
 A mono-repo that ships two tightly-coupled tools:
 
@@ -356,14 +358,17 @@ gemini-skills/
 ## 11. Troubleshooting
 
 ### Quota Exhausted / Rate Limits
+
 If the Gemini API returns `MODEL_CAPACITY_EXHAUSTED` (429), the `create.sh` script automatically:
-1.  **Pauses** for 60 seconds (exponential backoff: 60s, 120s, 180s).
-2.  **Retries** the generation up to 3 times.
-3.  **Resumes** automatically if quota frees up.
+
+1. **Pauses** for 60 seconds (exponential backoff: 60s, 120s, 180s).
+2. **Retries** the generation up to 3 times.
+3. **Resumes** automatically if quota frees up.
 
 Check live availability with `./check_quota.sh`.
 
 ### Syntax Errors in create.sh
+
 If you see `syntax error near unexpected token`, ensure you're using `bash` 4.0+ and not `sh`. The script uses arrays and process substitution.
 
 ---
