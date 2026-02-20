@@ -27,8 +27,10 @@ CLI args (override env vars):
   --base-url URL            Full FastAPI base URL (overrides --host / --port)
   --remote-url URL          Web server base URL where sites are served
                             (default: http://<host>  i.e. port 80, path /<slug>/index.html)
-  --query QUERY             Maps search query
-  --build-wait SECONDS      Max seconds to wait for build (remote: polls /status)
+  --business-type TYPE      Business type for Maps search  (e.g. "parrucchiere")
+  --location LOC            Location for Maps search        (e.g. "la spezia")
+  --query QUERY             Raw Maps search query (overridden by --business-type + --location)
+  --build-wait SECONDS      Max seconds to wait for build (remote: polls site URL)
   --webhook-url URL         Webhook URL passed to /generate-site
 
 Usage examples:
@@ -76,7 +78,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--remote-url", metavar="URL",
         help="Web server base URL where sites are served "
              "(default: http://<host>  →  http://<host>/<slug>/index.html)")
-    parser.add_argument("--query",      metavar="QUERY",  help="Maps search query")
+    # Search — can use structured args OR a raw query string
+    parser.add_argument("--business-type", metavar="TYPE",
+        help="Business type for Maps search  (e.g. \"parrucchiere\")")
+    parser.add_argument("--location",      metavar="LOC",
+        help="Location for Maps search  (e.g. \"la spezia\")")
+    parser.add_argument("--query",         metavar="QUERY",
+        help="Raw Maps search query (overridden by --business-type + --location)")
     parser.add_argument("--build-wait", metavar="SECONDS",type=int, help="Max build wait in seconds")
     parser.add_argument("--webhook-url",metavar="URL",    help="Webhook URL for /generate-site")
     return parser.parse_args()
@@ -113,9 +121,21 @@ def _resolve_base_url() -> str:
     return f"http://localhost:{port}"
 
 BASE_URL    = _resolve_base_url()
-QUERY       = ARGS.query       or os.environ.get("QUERY",       "parrucchiere la spezia")
 WEBHOOK_URL = ARGS.webhook_url or os.environ.get("WEBHOOK_URL", "https://webhook.site/dummy-test-url")
 BUILD_WAIT  = ARGS.build_wait  or int(os.environ.get("BUILD_WAIT", "900"))
+
+# Search query resolution:
+#   --business-type + --location  → structured (preferred)
+#   --query / QUERY env           → raw fallback
+#   default                       → "parrucchiere la spezia"
+BUSINESS_TYPE: str = (ARGS.business_type or "").strip()
+LOCATION:      str = (ARGS.location      or "").strip()
+if BUSINESS_TYPE and LOCATION:
+    QUERY = f"{BUSINESS_TYPE} {LOCATION}"          # display / slug purposes
+else:
+    QUERY = ARGS.query or os.environ.get("QUERY", "parrucchiere la spezia")
+    BUSINESS_TYPE = ""
+    LOCATION      = ""
 
 def _resolve_remote_site_url() -> str:
     """
@@ -233,13 +253,33 @@ def step_health():
 # ─── Step 2: Scrape ───────────────────────────────────────────────────────────
 def step_scrape() -> dict:
     print(f"\n{YELLOW}[Step 2] Scrape Google Maps{NC}")
-    info(f'Query: "{QUERY}" (max_results=1)')
-    info("⏳ May take up to 30 seconds...")
+
+    # Build request: prefer structured business_type + location params
+    if BUSINESS_TYPE and LOCATION:
+        params = {
+            "business_type": BUSINESS_TYPE,
+            "location":      LOCATION,
+            "max_results":   1,
+        }
+        info(f'business_type: "{BUSINESS_TYPE}"')
+        info(f'location     : "{LOCATION}"')
+        # Show the Maps URL that will be constructed server-side
+        combined = urllib.parse.quote_plus(f"{BUSINESS_TYPE} {LOCATION}")
+        info(f'Maps URL     : https://www.google.com/maps/search/{combined}?hl=<SITE_LANG>')
+    else:
+        params = {
+            "query":       QUERY,
+            "max_results": 1,
+        }
+        encoded = urllib.parse.quote_plus(QUERY)
+        info(f'query: "{QUERY}"')
+        info(f'Maps URL: https://www.google.com/maps/search/{encoded}?hl=<SITE_LANG>')
+
+    info("\u23f3 May take up to 30 seconds...")
     print()
 
-    encoded = urllib.parse.quote_plus(QUERY)
     try:
-        r = requests.get(f"{BASE_URL}/scrape-maps?query={encoded}&max_results=1", timeout=130)
+        r = requests.get(f"{BASE_URL}/scrape-maps", params=params, timeout=130)
         data = r.json()
     except Exception as e:
         fail(f"Scrape request failed: {e}", fatal=True)

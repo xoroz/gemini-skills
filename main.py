@@ -27,6 +27,13 @@ if os.path.exists(_env_path):
 # ---------------------------------------------------------------------------
 REMOTE_SITE_URL: str = os.environ.get("REMOTE_SITE_URL", "").rstrip("/")
 
+# ---------------------------------------------------------------------------
+# SITE_LANG — language for Google Maps search results (hl= param)
+# Set in .env or as a system environment variable.
+# Default: it (Italian)
+# ---------------------------------------------------------------------------
+SITE_LANG: str = os.environ.get("SITE_LANG", "it").strip().lower()
+
 # =============================================================================
 # ⏱️  TIMEOUTS  — edit these if builds are consistently faster/slower
 # =============================================================================
@@ -307,8 +314,8 @@ async def _do_scrape(query: str, max_results: int) -> dict:
         page = await context.new_page()
 
         safe_query = urllib.parse.quote_plus(query)
-        # hl=it keeps results in Italian; the cookie stops the consent popup
-        url = f"https://www.google.com/maps/search/{safe_query}?hl=it"
+        # hl= keeps results in the configured language; cookie stops consent popup
+        url = f"https://www.google.com/maps/search/{safe_query}?hl={SITE_LANG}"
 
         print(f"🕵️ Scraping Maps for: {query}")
         await page.goto(url)
@@ -381,15 +388,50 @@ async def _do_scrape(query: str, max_results: int) -> dict:
 
 
 @app.get("/scrape-maps")
-async def scrape_google_maps(query: str, max_results: int = 5):
-    print(f"🕵️ [SCRAPE] query='{query}' max_results={max_results} timeout={SCRAPE_TIMEOUT}s")
+async def scrape_google_maps(
+    query: str = "",
+    business_type: str = "",
+    location: str = "",
+    max_results: int = 5,
+):
+    """
+    Scrape Google Maps listings.
+
+    You can call this two ways:
+
+    **1. Raw query** (backward-compatible):
+        GET /scrape-maps?query=parrucchiere+la+spezia
+
+    **2. Structured params** (recommended — auto-encodes correctly):
+        GET /scrape-maps?business_type=parrucchiere&location=la+spezia
+
+    The structured form builds:
+        https://www.google.com/maps/search/parrucchiere+la+spezia?hl={SITE_LANG}
+
+    SITE_LANG env var controls the `hl=` parameter (default: it).
+    """
+    if not query and not (business_type and location):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either 'query' OR both 'business_type' and 'location'."
+        )
+
+    # Build canonical query string from structured params when available
+    if business_type and location:
+        # e.g. "pizza restaurant" + "la spezia" → "pizza restaurant la spezia"
+        combined = f"{business_type.strip()} {location.strip()}"
+        effective_query = combined
+    else:
+        effective_query = query.strip()
+
+    print(f"🕵️ [SCRAPE] query='{effective_query}'  lang={SITE_LANG}  max_results={max_results}  timeout={SCRAPE_TIMEOUT}s")
     try:
         return await asyncio.wait_for(
-            _do_scrape(query, max_results),
+            _do_scrape(effective_query, max_results),
             timeout=SCRAPE_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        print(f"⏰ [SCRAPE] Timeout ({SCRAPE_TIMEOUT}s) hit for query: '{query}'")
+        print(f"⏰ [SCRAPE] Timeout ({SCRAPE_TIMEOUT}s) hit for query: '{effective_query}'")
         raise HTTPException(
             status_code=504,
             detail=f"Scrape timed out after {SCRAPE_TIMEOUT // 60} minutes. "
