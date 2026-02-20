@@ -13,6 +13,24 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:$PATH"
 IMAGE_SCRIPT="$SCRIPT_DIR/skills/nano-banana-pro/scripts/image.py"
 
+# Load .env if present (system env vars always win)
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Skip comments and blank lines
+    [[ "$line" =~ ^\s*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    # Only export if the var is not already set in the environment
+    key="${line%%=*}"
+    if [ -z "${!key+x}" ]; then
+      export "$line" 2>/dev/null || true
+    fi
+  done < "$SCRIPT_DIR/.env"
+fi
+
+# REMOTE_SITE_URL — public web server root (optional)
+# e.g. http://192.168.0.114  → sites at http://192.168.0.114/<slug>/index.html
+REMOTE_SITE_URL="${REMOTE_SITE_URL%/}"  # strip trailing slash if any
+
 # =============================================================================
 # IMAGE MODEL & PRICING — edit these when rates change
 # =============================================================================
@@ -461,5 +479,14 @@ echo "  ├── style.css"
 echo "  └── build.log"
 echo ""
 echo "  📋 Full log: $LOG_FILE"
-echo "  🌐 Open: open $FOLDER_NAME/index.html"
+echo ""
+
+# Final URL output  — the 🌐 Open: line is used by test-all.py as a build-complete marker
+if [ -n "$REMOTE_SITE_URL" ]; then
+  SITE_PUBLIC_URL="$REMOTE_SITE_URL/$SITE_SLUG/index.html"
+  echo "  🌐 Open: $SITE_PUBLIC_URL"
+  echo "  📂 Local: file://$SCRIPT_DIR/$FOLDER_NAME/index.html"
+else
+  echo "  🌐 Open: open $FOLDER_NAME/index.html"
+fi
 echo ""

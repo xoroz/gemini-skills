@@ -2,6 +2,10 @@
 .claude/
 .gemini/
 
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+# .env.example is intentionally tracked as the template
+
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

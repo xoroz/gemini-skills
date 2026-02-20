@@ -145,17 +145,64 @@ A `test_shot.png` screenshot will be created in the project root.
 
 ## 6. Environment variables
 
-Set at least one API key. Add these to your `~/.bashrc` / `~/.zshrc`:
+Copy the example file and edit it:
 
 ```bash
-# Required for image generation (primary)
+cp .env.example .env
+nano .env
+```
+
+Both `main.py` and `create.sh` automatically load `.env` on startup.
+System environment variables always take precedence over the file.
+
+### Required — at least one API key
+
+```bash
+# Primary image generation (Google AI Studio — free tier available)
 export GEMINI_API_KEY="your-google-ai-studio-key"
 
-# Optional fallback — uses google/gemini-2.5-flash-image via OpenRouter
+# Fallback — uses google/gemini-2.5-flash-image via OpenRouter
 export OPENROUTER_API_KEY="your-openrouter-key"
 ```
 
 Get a free Gemini API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+
+### `REMOTE_SITE_URL` — public site base URL ★
+
+This is the most important setting for **remote / production deployments**.
+
+The FastAPI server runs on one port (e.g. `:8080`) while nginx/apache
+serves the generated HTML sites on a different URL (e.g. port 80).
+`REMOTE_SITE_URL` tells the system where the sites are publicly accessible.
+
+```bash
+# .env  (or export in shell)
+REMOTE_SITE_URL=http://192.168.0.114        # LAN — nginx on port 80
+# REMOTE_SITE_URL=https://sites.example.com # Production domain
+# REMOTE_SITE_URL=http://192.168.0.114/sites # If served under /sites/ prefix
+```
+
+**When `REMOTE_SITE_URL` is set:**
+
+| Component | Effect |
+|-----------|--------|
+| `main.py` | `/generate-site` response immediately includes `site_url` |
+| `create.sh` | Build summary prints the full `http://` URL |
+| `test-all.py` | Remote mode validates the live site at `REMOTE_SITE_URL/<slug>/index.html` |
+
+**Example `/generate-site` response with `REMOTE_SITE_URL` set:**
+
+```json
+{
+  "status": "processing",
+  "message": "Job added to queue.",
+  "site_slug": "luigi-hair-salon",
+  "site_url": "http://192.168.0.114/luigi-hair-salon/index.html"
+}
+```
+
+**When `REMOTE_SITE_URL` is not set**, everything still works — only local
+`file://` paths are shown in logs.
 
 ---
 
@@ -239,17 +286,51 @@ source venv/bin/activate
 python test-playwright.py
 ```
 
-### 9.2 Full End-to-End Integration Test (Recommended)
+### 9.2 Full End-to-End Integration Test
 
-This runs the entire pipeline: scrapes Google Maps, feeds the data to the API, tails the build log live, and validates the final site with Playwright (screenshot + DOM check).
+Runs the full pipeline: scrapes Google Maps, triggers a build, waits for
+completion, and validates the result with Playwright.
 
 ```bash
-# Force DEV mode (cheap images) and run everything
-./tests/test-all.sh
+source venv/bin/activate
 
-# With custom parameters
-QUERY="ristorante roma" ./tests/test-all.sh
+# Local (default) — reads build.log and validates files on disk
+python tests/test-all.py
+
+# Custom search query
+python tests/test-all.py --query "ristorante roma"
+
+# Remote mode — API on :8080, sites served by nginx on :80
+# (skips local file checks, validates the live HTTP URL instead)
+python tests/test-all.py --remote --host 192.168.0.114 --port 8080
+
+# Remote with explicit site root (if nginx serves under /sites/ prefix)
+python tests/test-all.py --remote --host 192.168.0.114 --port 8080 \
+    --remote-url http://192.168.0.114/sites
 ```
+
+| CLI arg | Env var | Default | Description |
+|---------|---------|---------|-------------|
+| `--remote` | `REMOTE=true` | off | Skip local filesystem steps |
+| `--host HOST` | — | localhost | Remote host IP or hostname |
+| `--port PORT` | `PORT` | 8000 | FastAPI port |
+| `--base-url URL` | `BASE_URL` | derived | Full FastAPI URL (overrides --host/--port) |
+| `--remote-url URL` | `REMOTE_SITE_URL` | derived | Web server base serving the sites |
+| `--query QUERY` | `QUERY` | parrucchiere la spezia | Maps search query |
+| `--build-wait N` | `BUILD_WAIT` | 900 | Max seconds to wait for build |
+
+**What each mode skips/runs:**
+
+| Step | Local | Remote |
+|------|-------|--------|
+| Health check | ✅ | ✅ |
+| Scrape Maps | ✅ | ✅ |
+| Trigger build | ✅ | ✅ |
+| Tail `build.log` | ✅ | ⏭ skipped |
+| Check local files | ✅ | ⏭ skipped |
+| Playwright `file://` | ✅ | ⏭ skipped |
+| Poll `/status` API | ⏭ skipped | ✅ |
+| Playwright `http://` | ⏭ skipped | ✅ |
 
 ### 9.3 API smoke tests (endpoints only)
 

@@ -1,11 +1,31 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
+import re
 import urllib.parse
 import asyncio
 import signal
 import httpx
 import os
+
+# ---------------------------------------------------------------------------
+# Load .env if present (optional — system env vars always take precedence)
+# ---------------------------------------------------------------------------
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+
+# ---------------------------------------------------------------------------
+# REMOTE_SITE_URL — the public web-server root where generated sites are served
+# e.g. http://192.168.0.114   → sites live at http://192.168.0.114/<slug>/index.html
+# Set in .env or as a system environment variable.
+# ---------------------------------------------------------------------------
+REMOTE_SITE_URL: str = os.environ.get("REMOTE_SITE_URL", "").rstrip("/")
 
 # =============================================================================
 # ⏱️  TIMEOUTS  — edit these if builds are consistently faster/slower
@@ -46,6 +66,13 @@ async def validate_environment():
         if has_openrouter: key_info.append("OPENROUTER_API_KEY ✅")
         print(f"✅ [STARTUP] Environment OK — {', '.join(key_info)}")
         print(f"✅ [STARTUP] create.sh found and executable")
+
+    if REMOTE_SITE_URL:
+        print(f"🌐 [STARTUP] REMOTE_SITE_URL = {REMOTE_SITE_URL}")
+        print(f"             Sites will be served at: {REMOTE_SITE_URL}/<slug>/index.html")
+    else:
+        print("ℹ️  [STARTUP] REMOTE_SITE_URL not set — site URLs will use local path only.")
+        print("             Set REMOTE_SITE_URL in .env or environment to expose public URLs.")
 
 # ==========================================
 # 1. DATA MODELS
@@ -88,6 +115,13 @@ def _kill_process_group(process: asyncio.subprocess.Process) -> None:
         except Exception:
             pass
 
+def _site_slug(name: str) -> str:
+    """Mirror create.sh slug logic: lowercase, spaces→hyphens, strip non-alnum-hyphen."""
+    s = name.lower().replace(" ", "-")
+    s = re.sub(r"[^a-z0-9-]", "", s)
+    return s
+
+
 async def build_site_and_notify(data: BusinessData):
     script_path = "./create.sh"
     process = None
@@ -125,7 +159,12 @@ async def build_site_and_notify(data: BusinessData):
 
         if process.returncode == 0:
             print(f"✅ [BACKGROUND] Success: {data.business_name}")
-            payload = {"status": "success", "business_name": data.business_name}
+            site_slug = _site_slug(data.business_name)
+            payload: dict = {"status": "success", "business_name": data.business_name}
+            if REMOTE_SITE_URL:
+                payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
+            else:
+                payload["site_slug"] = site_slug
         else:
             err_text = stderr.decode(errors="replace").strip()
             print(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")
@@ -149,11 +188,100 @@ async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
 
     # Add to background queue and return instantly
     background_tasks.add_task(build_site_and_notify, data)
-    return {"status": "processing", "message": "Job added to queue."}
+
+    site_slug = _site_slug(data.business_name)
+    response: dict = {
+        "status": "processing",
+        "message": "Job added to queue.",
+        "site_slug": site_slug,
+    }
+    if REMOTE_SITE_URL:
+        response["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
+
+    return response
 
 
 # ==========================================
-# 3. THE SCRAPER (Playwright)
+# 3. BUILD LOG READER
+# ==========================================
+
+def _parse_build_stats(log_text: str) -> dict:
+    """
+    Extract key metrics from the build.log stats block.
+    Returns a dict; missing fields are simply omitted.
+    """
+    stats: dict = {}
+
+    m = re.search(r"Total time:\s+([\d]+m\s+[\d]+s)", log_text)
+    if m: stats["total_time"] = m.group(1).strip()
+
+    m = re.search(r"Mode:\s+(\w+)\s+\(([^)]+)\)", log_text)
+    if m: stats["mode"] = f"{m.group(1)} ({m.group(2).strip()})"
+
+    m = re.search(r"Generated:\s+(\d+)\s*/\s*(\d+)", log_text)
+    if m:
+        stats["images_generated"] = int(m.group(1))
+        stats["images_total"]     = int(m.group(2))
+
+    m = re.search(r"Failed:\s+(\d+)", log_text)
+    if m: stats["images_failed"] = int(m.group(1))
+
+    m = re.search(r"Total:\s+~?\$?([\d.]+)", log_text)
+    if m: stats["estimated_cost_usd"] = float(m.group(1))
+
+    m = re.search(r"Assets size:\s+(\S+)", log_text)
+    if m: stats["assets_size"] = m.group(1).strip()
+
+    m = re.search(r"Total size:\s+(\S+)", log_text)
+    if m: stats["total_size"] = m.group(1).strip()
+
+    # Final public URL written by create.sh: "🌐 Open: http://..."
+    m = re.search(r"Open:\s+(https?://\S+)", log_text)
+    if m: stats["site_url"] = m.group(1).strip()
+
+    return stats
+
+
+@app.get("/build-log/{slug}")
+async def get_build_log(slug: str, lines: int = 0):
+    """
+    Return the build log and parsed stats for a generated site.
+
+    - **slug**  — site slug, e.g. `luigi-hair-salon`
+    - **lines** — if > 0, only the last N lines of the raw log are returned
+                  (useful to tail a running build); default 0 = full log
+    """
+    log_path = os.path.join("sites", slug, "build.log")
+    if not os.path.exists(log_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No build.log for '{slug}'. Build may not have started yet."
+        )
+
+    with open(log_path, "r", errors="replace") as f:
+        full_log = f.read()
+
+    raw = "\n".join(full_log.splitlines()[-lines:]) if lines > 0 else full_log
+
+    # Detect state from the tail of the log
+    tail = full_log[-2000:]
+    if "🌐 Open:" in tail:
+        build_status = "complete"
+    elif "❌ Failed" in tail or "exit 1" in tail:
+        build_status = "failed"
+    else:
+        build_status = "in_progress"
+
+    return {
+        "slug":         slug,
+        "build_status": build_status,
+        "stats":        _parse_build_stats(full_log),
+        "log":          raw,
+    }
+
+
+# ==========================================
+# 4. THE SCRAPER (Playwright)
 # ==========================================
 
 async def _do_scrape(query: str, max_results: int) -> dict:
