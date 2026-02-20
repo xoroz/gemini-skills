@@ -65,13 +65,19 @@ from pathlib import Path
 # Load .env if present (optional — system env vars always take precedence)
 # ---------------------------------------------------------------------------
 _env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+_env_loaded = False
 if os.path.exists(_env_path):
+    _env_loaded = True
     with open(_env_path) as _f:
         for _line in _f:
             _line = _line.strip()
             if _line and not _line.startswith("#") and "=" in _line:
                 _k, _, _v = _line.partition("=")
-                os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+                _k = _k.strip()
+                _v = _v.strip().strip('"').strip("'")
+                # Override locally empty shell variables with real file values
+                if not os.environ.get(_k):
+                    os.environ[_k] = _v
 
 # ─── CLI args ─────────────────────────────────────────────────────────────────
 def _parse_args() -> argparse.Namespace:
@@ -783,6 +789,9 @@ def _playwright_dom_checks(page, screenshot: Path):
 def main():
     print()
     print(f"{BOLD}{CYAN}🧪 Review Site Factory — Full Integration Test{NC}")
+    if _env_loaded:
+        token_str = f"{API_TOKEN[:4]}...{API_TOKEN[-4:]}" if len(API_TOKEN) > 8 else "NOT SET/EMPTY"
+        print(f"   .env    : Loaded (API_TOKEN={token_str})")
     print(f"   API     : {BASE_URL}")
     print(f"   Query   : {QUERY}")
     print(f"   Mode    : DEV (forced — cheap images for testing)")
