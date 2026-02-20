@@ -189,7 +189,7 @@ fi
 
 # 6. Install Playwright Browsers
 echo -e "${YELLOW}[6/9] Installing Playwright Browsers...${NC}"
-playwright install chromium
+./venv/bin/playwright install chromium
 
 # 7. Install Gemini Extension
 echo -e "${YELLOW}[7/9] Installing Gemini Extension...${NC}"
