@@ -150,6 +150,7 @@ else:
 
 API_TOKEN = os.environ.get("API_TOKEN", "")
 AUTH_HEADERS = {"Authorization": f"Bearer {API_TOKEN}"} if API_TOKEN else {}
+SITE_LANG = os.environ.get("SITE_LANG", "it")
 
 def _resolve_remote_site_url() -> str:
     """
@@ -279,7 +280,7 @@ def step_scrape() -> dict:
         info(f'location     : "{LOCATION}"')
         # Show the Maps URL that will be constructed server-side
         combined = urllib.parse.quote_plus(f"{BUSINESS_TYPE} {LOCATION}")
-        info(f'Maps URL     : https://www.google.com/maps/search/{combined}?hl=<SITE_LANG>')
+        info(f'Maps URL     : https://www.google.com/maps/search/{combined}?hl={SITE_LANG}')
     else:
         params = {
             "query":       QUERY,
@@ -287,7 +288,7 @@ def step_scrape() -> dict:
         }
         encoded = urllib.parse.quote_plus(QUERY)
         info(f'query: "{QUERY}"')
-        info(f'Maps URL: https://www.google.com/maps/search/{encoded}?hl=<SITE_LANG>')
+        info(f'Maps URL: https://www.google.com/maps/search/{encoded}?hl={SITE_LANG}')
 
     info("\u23f3 May take up to 30 seconds...")
     print()
