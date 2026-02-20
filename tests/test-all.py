@@ -58,9 +58,20 @@ import re
 import sys
 import time
 import urllib.parse
+import httpx
 from pathlib import Path
 
-import requests
+# ---------------------------------------------------------------------------
+# Load .env if present (optional — system env vars always take precedence)
+# ---------------------------------------------------------------------------
+_env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 # ─── CLI args ─────────────────────────────────────────────────────────────────
 def _parse_args() -> argparse.Namespace:
@@ -137,6 +148,9 @@ else:
     BUSINESS_TYPE = ""
     LOCATION      = ""
 
+API_TOKEN = os.environ.get("API_TOKEN", "")
+AUTH_HEADERS = {"Authorization": f"Bearer {API_TOKEN}"} if API_TOKEN else {}
+
 def _resolve_remote_site_url() -> str:
     """
     The web server URL root where generated sites are accessible.
@@ -158,7 +172,7 @@ def _resolve_remote_site_url() -> str:
         return f"http://{ARGS.host}"
     # Derive from BASE_URL by stripping any non-80 port
     import urllib.parse as _up
-    parsed = _up.urlparse(BASE_URL)
+    parsed = urllib.parse.urlparse(BASE_URL)
     return f"{parsed.scheme}://{parsed.hostname}"
 
 REMOTE_SITE_URL = _resolve_remote_site_url()
@@ -238,7 +252,7 @@ def slug(name: str) -> str:
 def step_health():
     print(f"\n{YELLOW}[Step 1] Server health check{NC}")
     try:
-        r = requests.get(f"{BASE_URL}/docs", timeout=5)
+        r = httpx.get(f"{BASE_URL}/docs", timeout=5)
         if r.status_code == 200:
             ok(f"Server reachable at {BASE_URL}")
         else:
@@ -279,7 +293,7 @@ def step_scrape() -> dict:
     print()
 
     try:
-        r = requests.get(f"{BASE_URL}/scrape-maps", params=params, timeout=130)
+        r = httpx.get(f"{BASE_URL}/scrape-maps", params=params, headers=AUTH_HEADERS, timeout=130)
         data = r.json()
     except Exception as e:
         fail(f"Scrape request failed: {e}", fatal=True)
@@ -326,8 +340,8 @@ def step_generate(biz: dict) -> str:
     print()
 
     try:
-        r = requests.post(f"{BASE_URL}/generate-site",
-                          json=payload, timeout=10)
+        r = httpx.post(f"{BASE_URL}/generate-site",
+                          json=payload, headers=AUTH_HEADERS, timeout=10)
         resp = r.json()
     except Exception as e:
         fail(f"/generate-site request failed: {e}", fatal=True)
@@ -427,14 +441,14 @@ def step_wait_remote(site_slug: str):
         elapsed   = int(time.time() - start)
         remaining = max(0, int(deadline - time.time()))
         try:
-            r = requests.get(site_url, timeout=10)
+            r = httpx.get(site_url, timeout=10)
             if r.status_code == 200:
                 ok(f"Site is live! HTTP 200 after ~{elapsed}s  →  {site_url}")
                 return
             else:
                 print(f"  {DIM}[#{attempt}  {elapsed}s elapsed / {remaining}s left]  "
                       f"HTTP {r.status_code} — still building...{NC}")
-        except requests.ConnectionError:
+        except httpx.RequestError:
             print(f"  {DIM}[#{attempt}  {elapsed}s elapsed / {remaining}s left]  "
                   f"connection refused — server still building...{NC}")
         except Exception as e:
@@ -501,7 +515,7 @@ def step_build_log(site_slug: str):
         log_url = f"{REMOTE_SITE_URL}/{site_slug}/build.log"
         info(f"Fetching: {log_url}")
         try:
-            r = requests.get(log_url, timeout=10)
+            r = httpx.get(log_url, timeout=10)
             if r.status_code == 200:
                 log_text = r.text
                 ok(f"build.log fetched ({len(log_text):,} bytes)")
@@ -658,7 +672,7 @@ def step_validate_remote(site_slug: str):
 
     # Try primary first
     try:
-        r = requests.get(primary_url, timeout=8)
+        r = httpx.get(primary_url, timeout=8)
         if r.status_code == 200:
             site_url = primary_url
             ok(f"Site reachable at {primary_url}")
@@ -671,7 +685,7 @@ def step_validate_remote(site_slug: str):
     if not site_url:
         for url in fallback_candidates:
             try:
-                r = requests.get(url, timeout=5)
+                r = httpx.get(url, timeout=5)
                 if r.status_code == 200 and "html" in r.headers.get("content-type", "").lower():
                     site_url = url
                     ok(f"Site reachable (fallback) at {url}")

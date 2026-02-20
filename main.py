@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 import re
@@ -7,6 +7,29 @@ import asyncio
 import signal
 import httpx
 import os
+import logging
+from logging.handlers import RotatingFileHandler
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+# ---------------------------------------------------------------------------
+# Setup Logging
+# ---------------------------------------------------------------------------
+os.makedirs("logs", exist_ok=True)
+logger = logging.getLogger("backend")
+logger.setLevel(logging.DEBUG)
+
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+fh = RotatingFileHandler("logs/backend.log", maxBytes=5*1024*1024, backupCount=2)
+fh.setLevel(logging.DEBUG)
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+ch.setFormatter(formatter)
+logger.addHandler(ch)
 
 # ---------------------------------------------------------------------------
 # Load .env if present (optional — system env vars always take precedence)
@@ -41,7 +64,90 @@ BUILD_TIMEOUT  = 900   # seconds  (15 min) — full create.sh run: images + HTML
 SCRAPE_TIMEOUT = 120   # seconds  ( 2 min) — Google Maps Playwright scrape
 # =============================================================================
 
-app = FastAPI(title="Review Site Factory & Scraper API")
+# ---------------------------------------------------------------------------
+# OpenAPI / Swagger UI metadata
+# ---------------------------------------------------------------------------
+_description = """
+## Review Site Factory & Scraper API
+
+Automates the creation of local-business review landing pages and Google Maps scraping.
+
+### Workflow
+1. **Scrape** — call `/scrape-maps` to discover businesses in any niche & location.
+2. **Generate** — call `/generate-site` with the business data; a background job runs
+   `create.sh` (Gemini images + HTML/CSS) and POSTs the result to your `webhook_url`.
+3. **Monitor** — poll `/build-log/{slug}` to tail the live log and check build status.
+
+### Notes
+- Requires `GEMINI_API_KEY` **or** `OPENROUTER_API_KEY` in the environment.
+- Set `REMOTE_SITE_URL` so response payloads include the public site URL.
+- Build timeout: 15 minutes per site (configurable via `BUILD_TIMEOUT`).
+"""
+
+_tags_metadata = [
+    {
+        "name": "sites",
+        "description": "Generate AI-powered landing pages for local businesses.",
+    },
+    {
+        "name": "logs",
+        "description": "Inspect build logs and parsed statistics for generated sites.",
+    },
+    {
+        "name": "scraping",
+        "description": "Scrape Google Maps to discover business leads.",
+    },
+]
+
+app = FastAPI(
+    title="Review Site Factory & Scraper API",
+    description=_description,
+    version="1.0.0",
+    contact={
+        "name": "Auto-Sites",
+        "url": "https://github.com/xoroz/gemini-skills",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    openapi_tags=_tags_metadata,
+    docs_url="/docs",      # Swagger UI  — default, explicit for clarity
+    redoc_url="/redoc",   # ReDoc       — alternative, cleaner read view
+)
+
+# ---------------------------------------------------------------------------
+# CORS Configuration
+# ---------------------------------------------------------------------------
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in ALLOWED_ORIGINS if origin.strip()] or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Security: Static Bearer Token
+# ---------------------------------------------------------------------------
+API_TOKEN = os.environ.get("API_TOKEN", "")
+bearer_scheme = HTTPBearer(auto_error=False)
+
+async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    if API_TOKEN:
+        if not credentials or credentials.credentials != API_TOKEN:
+            logger.warning("Unauthorized access attempt with invalid token.")
+            raise HTTPException(status_code=401, detail="Invalid or missing authentication token")
+    return credentials
+
+# ---------------------------------------------------------------------------
+# Health Check Endpoint
+# ---------------------------------------------------------------------------
+@app.get("/health", tags=["system"])
+async def health_check():
+    """Simple health check endpoint for monitoring."""
+    return {"status": "ok", "version": "1.0.0"}
 
 # ==========================================
 # 0. STARTUP VALIDATION
@@ -65,21 +171,21 @@ async def validate_environment():
 
     if errors:
         for err in errors:
-            print(f"❌ [STARTUP] {err}")
-        print("⚠️  [STARTUP] Server started with configuration errors — /generate-site will fail.")
+            logger.error(f"❌ [STARTUP] {err}")
+        logger.warning("⚠️  [STARTUP] Server started with configuration errors — /generate-site will fail.")
     else:
         key_info = []
         if has_gemini:     key_info.append("GEMINI_API_KEY ✅")
         if has_openrouter: key_info.append("OPENROUTER_API_KEY ✅")
-        print(f"✅ [STARTUP] Environment OK — {', '.join(key_info)}")
-        print(f"✅ [STARTUP] create.sh found and executable")
+        logger.info(f"✅ [STARTUP] Environment OK — {', '.join(key_info)}")
+        logger.info(f"✅ [STARTUP] create.sh found and executable")
 
     if REMOTE_SITE_URL:
-        print(f"🌐 [STARTUP] REMOTE_SITE_URL = {REMOTE_SITE_URL}")
-        print(f"             Sites will be served at: {REMOTE_SITE_URL}/<slug>/index.html")
+        logger.info(f"🌐 [STARTUP] REMOTE_SITE_URL = {REMOTE_SITE_URL}")
+        logger.info(f"             Sites will be served at: {REMOTE_SITE_URL}/<slug>/index.html")
     else:
-        print("ℹ️  [STARTUP] REMOTE_SITE_URL not set — site URLs will use local path only.")
-        print("             Set REMOTE_SITE_URL in .env or environment to expose public URLs.")
+        logger.info("ℹ️  [STARTUP] REMOTE_SITE_URL not set — site URLs will use local path only.")
+        logger.info("             Set REMOTE_SITE_URL in .env or environment to expose public URLs.")
 
 # ==========================================
 # 1. DATA MODELS
@@ -111,11 +217,11 @@ def _kill_process_group(process: asyncio.subprocess.Process) -> None:
     try:
         pgid = os.getpgid(process.pid)
         os.killpg(pgid, signal.SIGKILL)
-        print(f"🔪 [BACKGROUND] Killed process group {pgid}")
+        logger.info(f"🔪 [BACKGROUND] Killed process group {pgid}")
     except ProcessLookupError:
         pass  # Already dead — that's fine
     except Exception as kill_err:
-        print(f"⚠️ [BACKGROUND] Could not kill process group: {kill_err}")
+        logger.warning(f"⚠️ [BACKGROUND] Could not kill process group: {kill_err}")
         # Fallback: kill just the direct child
         try:
             process.kill()
@@ -133,7 +239,7 @@ async def build_site_and_notify(data: BusinessData):
     script_path = "./create.sh"
     process = None
     try:
-        print(f"⚙️ [BACKGROUND] Starting build for: {data.business_name} "
+        logger.info(f"⚙️ [BACKGROUND] Starting build for: {data.business_name} "
               f"(timeout: {BUILD_TIMEOUT // 60}m)")
 
         # start_new_session=True puts create.sh in its own process group so we
@@ -152,7 +258,7 @@ async def build_site_and_notify(data: BusinessData):
                 timeout=BUILD_TIMEOUT,
             )
         except asyncio.TimeoutError:
-            print(f"⏰ [BACKGROUND] Timeout ({BUILD_TIMEOUT // 60}m) hit for: "
+            logger.warning(f"⏰ [BACKGROUND] Timeout ({BUILD_TIMEOUT // 60}m) hit for: "
                   f"{data.business_name} — killing process group")
             _kill_process_group(process)
             payload = {
@@ -165,7 +271,7 @@ async def build_site_and_notify(data: BusinessData):
             return
 
         if process.returncode == 0:
-            print(f"✅ [BACKGROUND] Success: {data.business_name}")
+            logger.info(f"✅ [BACKGROUND] Success: {data.business_name}")
             site_slug = _site_slug(data.business_name)
             payload: dict = {"status": "success", "business_name": data.business_name}
             if REMOTE_SITE_URL:
@@ -174,7 +280,7 @@ async def build_site_and_notify(data: BusinessData):
                 payload["site_slug"] = site_slug
         else:
             err_text = stderr.decode(errors="replace").strip()
-            print(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")
+            logger.error(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")
             payload = {"status": "error", "error": err_text}
 
         # Send result back to n8n Webhook
@@ -182,13 +288,13 @@ async def build_site_and_notify(data: BusinessData):
             await client.post(data.webhook_url, json=payload)
 
     except Exception as e:
-        print(f"🔥 [BACKGROUND] Unexpected error: {e}")
+        logger.error(f"🔥 [BACKGROUND] Unexpected error: {e}")
         if process is not None:
             _kill_process_group(process)
         async with httpx.AsyncClient() as client:
             await client.post(data.webhook_url, json={"status": "error", "error": str(e)})
 
-@app.post("/generate-site")
+@app.post("/generate-site", dependencies=[Depends(verify_token)], tags=["sites"])
 async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
     if not os.path.exists("./create.sh"):
         raise HTTPException(status_code=500, detail="create.sh not found on server")
@@ -249,7 +355,7 @@ def _parse_build_stats(log_text: str) -> dict:
     return stats
 
 
-@app.get("/build-log/{slug}")
+@app.get("/build-log/{slug}", dependencies=[Depends(verify_token)], tags=["logs"])
 async def get_build_log(slug: str, lines: int = 0):
     """
     Return the build log and parsed stats for a generated site.
@@ -317,7 +423,7 @@ async def _do_scrape(query: str, max_results: int) -> dict:
         # hl= keeps results in the configured language; cookie stops consent popup
         url = f"https://www.google.com/maps/search/{safe_query}?hl={SITE_LANG}"
 
-        print(f"🕵️ Scraping Maps for: {query}")
+        logger.info(f"🕵️ Scraping Maps for: {query}")
         await page.goto(url)
 
         # Wait for the listing feed to appear
@@ -387,7 +493,7 @@ async def _do_scrape(query: str, max_results: int) -> dict:
     return {"status": "success", "data": results}
 
 
-@app.get("/scrape-maps")
+@app.get("/scrape-maps", dependencies=[Depends(verify_token)], tags=["scraping"])
 async def scrape_google_maps(
     query: str = "",
     business_type: str = "",
@@ -424,14 +530,14 @@ async def scrape_google_maps(
     else:
         effective_query = query.strip()
 
-    print(f"🕵️ [SCRAPE] query='{effective_query}'  lang={SITE_LANG}  max_results={max_results}  timeout={SCRAPE_TIMEOUT}s")
+    logger.info(f"🕵️ [SCRAPE] query='{effective_query}'  lang={SITE_LANG}  max_results={max_results}  timeout={SCRAPE_TIMEOUT}s")
     try:
         return await asyncio.wait_for(
             _do_scrape(effective_query, max_results),
             timeout=SCRAPE_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        print(f"⏰ [SCRAPE] Timeout ({SCRAPE_TIMEOUT}s) hit for query: '{effective_query}'")
+        logger.warning(f"⏰ [SCRAPE] Timeout ({SCRAPE_TIMEOUT}s) hit for query: '{effective_query}'")
         raise HTTPException(
             status_code=504,
             detail=f"Scrape timed out after {SCRAPE_TIMEOUT // 60} minutes. "

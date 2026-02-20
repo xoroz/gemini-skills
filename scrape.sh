@@ -21,6 +21,7 @@
 #   BASE_URL   — FastAPI server (default: http://localhost:8000)
 #   SITE_LANG  — language for Maps results (default: it)
 #   PORT       — API port; only used when BASE_URL is not set
+#   API_TOKEN  — Bearer token (if configured in .env)
 # =============================================================================
 
 set -euo pipefail
@@ -101,12 +102,20 @@ echo ""
 BT_ENC="$(urlencode "$BUSINESS_TYPE")"
 LOC_ENC="$(urlencode "$LOCATION")"
 
-RESPONSE="$(curl -sf \
+AUTH_HEADER=()
+if [ -n "${API_TOKEN:-}" ]; then
+  AUTH_HEADER=("-H" "Authorization: Bearer ${API_TOKEN}")
+fi
+
+set +e
+RESPONSE="$(curl -s \
   "${API_BASE}/scrape-maps?business_type=${BT_ENC}&location=${LOC_ENC}&max_results=${MAX_RESULTS}" \
   --max-time 140 \
-  -H "Accept: application/json")"
-
+  -H "Accept: application/json" \
+  "${AUTH_HEADER[@]:+${AUTH_HEADER[@]}}")"
 STATUS=$?
+set -e
+
 if [ $STATUS -ne 0 ]; then
   echo "❌ curl failed (exit $STATUS) — is the API server running at ${API_BASE}?"
   echo "   Start it with:  uvicorn main:app --host 0.0.0.0 --port ${PORT}"
@@ -119,7 +128,7 @@ echo ""
 
 # Check for python3 for pretty-print; fall back to raw
 if command -v python3 &>/dev/null; then
-  echo "$RESPONSE" | python3 -m json.tool --indent 2
+  echo "$RESPONSE" | python3 -m json.tool --indent 2 || echo "$RESPONSE"
 else
   echo "$RESPONSE"
 fi

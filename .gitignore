@@ -1,7 +1,7 @@
 # ── Gemini / Claude local settings ──────────────────────────────────────────
 .claude/
 .gemini/
-
+logs/
 # ── Environment / secrets ─────────────────────────────────────────────────────
 .env
 # .env.example is intentionally tracked as the template

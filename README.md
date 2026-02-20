@@ -204,6 +204,22 @@ REMOTE_SITE_URL=http://192.168.0.114        # LAN — nginx on port 80
 **When `REMOTE_SITE_URL` is not set**, everything still works — only local
 `file://` paths are shown in logs.
 
+### Security & CORS (`API_TOKEN` and `ALLOWED_ORIGINS`)
+
+By default, the API is open. To lock it down for production:
+
+```bash
+# Set a static Bearer token to protect the endpoints (except /health and /docs)
+export API_TOKEN="your-super-secret-token"
+
+# Comma-separated list of allowed Frontend domains for CORS
+export ALLOWED_ORIGINS="http://localhost:3000,https://my-frontend.com"
+```
+
+If `API_TOKEN` is set, you **must** pass it via the `Authorization` header when calling `/generate-site` or `/scrape-maps`.
+
+> **Note:** The included `scrape.sh` tool will automatically read `API_TOKEN` from `.env` and pass it for you.
+
 ---
 
 ## 7. Configuration & Modes
@@ -249,8 +265,10 @@ The FastAPI server exposes two endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/generate-site` | Queue a landing-page build job (async, calls `create.sh`) |
-| `GET` | `/scrape-maps` | Scrape Google Maps listings with Playwright |
+| `GET`  | `/health` | Public system check (`{"status": "ok"}`) |
+| `POST` | `/generate-site` | Queue a landing-page build job (Secured: Bearer) |
+| `GET`  | `/scrape-maps` | Scrape Google Maps listings (Secured: Bearer) |
+| `GET`  | `/build-log/{slug}` | Poll build logs and stats (Secured: Bearer) |
 
 ### Start the server
 
@@ -353,6 +371,7 @@ BASE_URL=http://your-server:8000 ./tests/test-api.sh
 ```bash
 curl -s -X POST "http://localhost:8000/generate-site" \
      -H "Content-Type: application/json" \
+     -H "Authorization: Bearer ${API_TOKEN}" \
      -d '{
            "business_name": "Luigi Hair Salon",
            "niche": "parrucchiere",
@@ -376,6 +395,7 @@ Expected response:
 ```bash
 curl -s -X GET \
   "http://localhost:8000/scrape-maps?query=parrucchiere+la+spezia&max_results=3" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   | python3 -m json.tool
 ```
 

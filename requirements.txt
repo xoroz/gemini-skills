@@ -1,23 +1,5 @@
-# Direct dependencies
-fastapi==0.110.0
-uvicorn==0.29.0
-pydantic==2.6.4
-playwright==1.42.0
-httpx==0.27.0
-
-# Transitive / pinned for reproducibility (Python 3.9.x)
-annotated-types==0.7.0
-anyio==4.12.1
-certifi==2026.1.4
-click==8.1.8
-exceptiongroup==1.3.1
-greenlet==3.0.3
-h11==0.16.0
-httpcore==1.0.9
-idna==3.11
-pydantic_core==2.16.3
-pyee==11.0.1
-sniffio==1.3.1
-starlette==0.36.3
-typing_extensions==4.15.0
-# NOTE: asyncio is stdlib in Python 3.9+ — do NOT pin it here
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.6.4
+playwright>=1.42.0
+httpx>=0.27.0

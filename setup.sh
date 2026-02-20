@@ -11,6 +11,25 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 PORT=${PORT:-8000}
 
+# Uninstall Logic
+if [[ "$1" == "--uninstall" ]]; then
+    echo -e "${YELLOW}Uninstalling Auto Sites Service...${NC}"
+    if systemctl is-active --quiet auto-sites.service; then
+        sudo systemctl stop auto-sites.service
+    fi
+    if systemctl is-enabled --quiet auto-sites.service 2>/dev/null; then
+        sudo systemctl disable auto-sites.service
+    fi
+    if [ -f "/etc/systemd/system/auto-sites.service" ]; then
+        sudo rm /etc/systemd/system/auto-sites.service
+        sudo systemctl daemon-reload
+    fi
+    echo "Removing local environment files..."
+    rm -rf venv .env
+    echo -e "${GREEN}Uninstallation Complete!${NC}"
+    exit 0
+fi
+
 echo -e "${GREEN}Starting Auto Sites Service Setup...${NC}"
 
 # 1. Check OS and Install System Dependencies
@@ -154,10 +173,15 @@ if [ ! -d "venv" ]; then
 fi
 
 echo "Installing requirements..."
-source venv/bin/activate
-pip install --upgrade pip
 if [ -f "requirements.txt" ]; then
-    pip install -r requirements.txt
+    if command -v uv &> /dev/null; then
+        echo "Using uv to install dependencies (fast)..."
+        uv pip install --python ./venv -r requirements.txt
+    else
+        echo "Using standard pip..."
+        ./venv/bin/python3 -m pip install --upgrade pip
+        ./venv/bin/pip install -r requirements.txt
+    fi
 else
     echo -e "${RED}requirements.txt not found!${NC}"
     exit 1
