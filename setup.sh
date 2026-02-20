@@ -10,14 +10,28 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 PORT=${PORT:-8000}
+DEBUG=${DEBUG:-false}
+SETUP_LOG="setup.log"
+
+# Clean previous log
+> "$SETUP_LOG"
+
+# Helper to redirect or tee noise
+run_cmd() {
+    if [[ "$DEBUG" == "true" ]]; then
+        "$@" 2>&1 | tee -a "$SETUP_LOG"
+    else
+        "$@" >> "$SETUP_LOG" 2>&1
+    fi
+}
 
 # Uninstall Logic
 if [[ "$1" == "--uninstall" ]]; then
     echo -e "${YELLOW}Uninstalling Auto Sites Service...${NC}"
-    if systemctl is-active --quiet auto-sites.service; then
+    if sudo systemctl is-active --quiet auto-sites.service 2>/dev/null; then
         sudo systemctl stop auto-sites.service
     fi
-    if systemctl is-enabled --quiet auto-sites.service 2>/dev/null; then
+    if sudo systemctl is-enabled --quiet auto-sites.service 2>/dev/null; then
         sudo systemctl disable auto-sites.service
     fi
     if [ -f "/etc/systemd/system/auto-sites.service" ]; then
@@ -57,13 +71,13 @@ echo "Detected OS: $OS"
 
 if [[ "$OS" == *"Fedora"* ]] || [[ "$OS" == *"Red Hat"* ]] || [[ "$OS" == *"CentOS"* ]]; then
     echo "Installing dependencies for RHEL/Fedora..."
-    sudo dnf update -y
-    sudo dnf install -y nss atk at-spi2-atk cups-libs libdrm mesa-libgbm \
+    run_cmd sudo dnf update -y
+    run_cmd sudo dnf install -y nss atk at-spi2-atk cups-libs libdrm mesa-libgbm \
         libXcomposite libXdamage libXext libXfixes libXrandr libxcb \
         libxkbcommon pango alsa-lib libXcursor libXi libXScrnSaver bc curl git $NODE_PACKAGES
 elif [[ "$OS" == *"Debian"* ]] || [[ "$OS" == *"Ubuntu"* ]]; then
     echo "Installing dependencies for Debian/Ubuntu..."
-    sudo apt-get update
+    run_cmd sudo apt-get update
     # Check for Ubuntu 24.04+ (Noble Numbat) which uses t64 packages for 64-bit time_t transition
     UBUNTU_MAJOR_VERSION=0
     if [[ "$OS" == *"Ubuntu"* ]] && [ ! -z "$VERSION_ID" ]; then
@@ -72,13 +86,13 @@ elif [[ "$OS" == *"Debian"* ]] || [[ "$OS" == *"Ubuntu"* ]]; then
 
     if [[ "$OS" == *"Ubuntu"* ]] && [[ "$UBUNTU_MAJOR_VERSION" -ge 24 ]]; then
         echo "Detected Ubuntu 24.04+ (Noble). Installing t64 packages..."
-        sudo apt-get install -y libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
+        run_cmd sudo apt-get install -qq -y libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
             libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
             libxrandr2 libxcb1 libxkbcommon0 libpango-1.0-0 \
             libasound2t64 libxcursor1 libxi6 libxss1 bc curl git $NODE_PACKAGES
     else
         echo "Installing default dependencies..."
-        sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        run_cmd sudo apt-get install -qq -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
             libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
             libxrandr2 libxcb1 libxkbcommon0 libpango-1.0-0 \
             libasound2 libxcursor1 libxi6 libxss1 bc curl git $NODE_PACKAGES
@@ -104,7 +118,7 @@ if command -v npm &> /dev/null; then
         echo "$MSG"
         
         mkdir -p "$HOME/.npm-global"
-        npm config set prefix "$HOME/.npm-global"
+        run_cmd npm config set prefix "$HOME/.npm-global"
         
         # Add to PATH immediately for this script
         export PATH="$HOME/.npm-global/bin:$PATH"
@@ -137,7 +151,7 @@ if ! command -v gemini &> /dev/null; then
     
     if command -v npm &> /dev/null; then
         echo "Installing Gemini CLI via npm (@google/gemini-cli)..."
-        npm install -g @google/gemini-cli
+        run_cmd npm install -g @google/gemini-cli
         
         # Re-check
         if ! command -v gemini &> /dev/null; then
@@ -158,7 +172,7 @@ fi
 echo -e "${YELLOW}[4/9] Checking uv...${NC}"
 if ! command -v uv &> /dev/null; then
     echo "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    run_cmd curl -LsSf https://astral.sh/uv/install.sh | sh
     # Source env to make uv available in this script
     source "$HOME/.local/bin/env" || export PATH="$HOME/.local/bin:$PATH"
 else
@@ -169,18 +183,18 @@ fi
 echo -e "${YELLOW}[5/9] Setting up Python Environment...${NC}"
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv venv
+    run_cmd python3 -m venv venv
 fi
 
 echo "Installing requirements..."
 if [ -f "requirements.txt" ]; then
     if command -v uv &> /dev/null; then
         echo "Using uv to install dependencies (fast)..."
-        uv pip install --python ./venv -r requirements.txt
+        run_cmd uv pip install --python ./venv -r requirements.txt
     else
         echo "Using standard pip..."
-        ./venv/bin/python3 -m pip install --upgrade pip
-        ./venv/bin/pip install -r requirements.txt
+        run_cmd ./venv/bin/python3 -m pip install --upgrade pip
+        run_cmd ./venv/bin/pip install -r requirements.txt
     fi
 else
     echo -e "${RED}requirements.txt not found!${NC}"
@@ -189,7 +203,7 @@ fi
 
 # 6. Install Playwright Browsers
 echo -e "${YELLOW}[6/9] Installing Playwright Browsers...${NC}"
-./venv/bin/playwright install chromium
+run_cmd ./venv/bin/playwright install chromium
 
 # 7. Install Gemini Extension
 echo -e "${YELLOW}[7/9] Installing Gemini Extension...${NC}"
@@ -303,6 +317,23 @@ else
     done
 fi
 
+# ---------------------------------------------------------------------------
+# Auto-seed Security & CORS Variables
+# ---------------------------------------------------------------------------
+# If API_TOKEN is empty in the file, generate a new secure one
+if grep -q "^API_TOKEN=$" "$ENV_FILE"; then
+    echo "Auto-generating secure API_TOKEN..."
+    NEW_TOKEN=$(openssl rand -hex 32)
+    update_env "API_TOKEN" "$NEW_TOKEN" "$ENV_FILE"
+    echo -e "${GREEN}Generated API_TOKEN: ${NEW_TOKEN}${NC}"
+fi
+
+# If ALLOWED_ORIGINS is exactly the default template from .env.example, replace it
+if grep -q "^ALLOWED_ORIGINS=http://localhost:3000,https://my-frontend.com$" "$ENV_FILE"; then
+    echo "Auto-configuring ALLOWED_ORIGINS for localhost & 127.0.0.1..."
+    update_env "ALLOWED_ORIGINS" "http://localhost:$PORT,http://127.0.0.1:$PORT" "$ENV_FILE"
+fi
+
 # Now apply the runtime dynamic values without destroying other keys (like API_TOKEN)
 update_env "PORT" "$PORT" "$ENV_FILE"
 
@@ -368,7 +399,7 @@ echo "Perform a test run? (This runs test-playwright.py)"
 read -p "Run test? (y/n) " RUN_TEST
 
 if [[ "$RUN_TEST" == "y" ]]; then
-    python test-playwright.py
+    ./venv/bin/python test-playwright.py
 fi
 
 echo -e "${GREEN}Setup Complete!${NC}"
