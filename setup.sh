@@ -271,15 +271,49 @@ if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
     fi
 fi
 
-echo "Generating $ENV_FILE..."
-# Create/Update .env file
-echo "PORT=$PORT" > "$ENV_FILE"
+echo "Configuring $ENV_FILE..."
+
+# Helper function to safely set or update a key=value in .env
+update_env() {
+    local key="$1"
+    local val="$2"
+    local file="$3"
+    # If key exists, replace it inline; if not, append it
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+    else
+        echo "${key}=${val}" >> "$file"
+    fi
+}
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Creating new .env from .env.example..."
+    cp "$CURRENT_DIR/.env.example" "$ENV_FILE"
+else
+    echo "Existing .env found. Checking for missing keys..."
+    # Append any variables from .env.example that don't exist in the current .env
+    grep -E '^[A-Z_]+=' "$CURRENT_DIR/.env.example" | while read -r line; do
+        key=$(echo "$line" | cut -d= -f1)
+        if ! grep -q "^${key}=" "$ENV_FILE"; then
+            echo "Appending missing key: $key"
+            echo "" >> "$ENV_FILE"
+            echo "# Auto-appended from .env.example during setup" >> "$ENV_FILE"
+            echo "$line" >> "$ENV_FILE"
+        fi
+    done
+fi
+
+# Now apply the runtime dynamic values without destroying other keys (like API_TOKEN)
+update_env "PORT" "$PORT" "$ENV_FILE"
+
 if [ ! -z "$GEMINI_API_KEY" ]; then
-    echo "GEMINI_API_KEY=\"$GEMINI_API_KEY\"" >> "$ENV_FILE"
+    update_env "GEMINI_API_KEY" "\"$GEMINI_API_KEY\"" "$ENV_FILE"
 fi
+
 if [ ! -z "$OPENROUTER_API_KEY" ]; then
-    echo "OPENROUTER_API_KEY=\"$OPENROUTER_API_KEY\"" >> "$ENV_FILE"
+    update_env "OPENROUTER_API_KEY" "\"$OPENROUTER_API_KEY\"" "$ENV_FILE"
 fi
+
 chmod 600 "$ENV_FILE"
 # Add explicit PATH to .env just in case, though usually better in service file.
 # We will rely on EnvironmentFile for keys and Environment for PATH in the service file.
