@@ -72,8 +72,8 @@ SITE_LANG: str = os.environ.get("SITE_LANG", "it").strip().lower()
 # =============================================================================
 # ⏱️  TIMEOUTS  — edit these if builds are consistently faster/slower
 # =============================================================================
-BUILD_TIMEOUT  = 900   # seconds  (15 min) — full create.sh run: images + HTML + CSS
-SCRAPE_TIMEOUT = 120   # seconds  ( 2 min) — Google Maps Playwright scrape
+BUILD_TIMEOUT  = int(os.environ.get("BUILD_TIMEOUT", "900"))   # seconds (15 min) — full create.sh run: images + HTML + CSS
+SCRAPE_TIMEOUT = int(os.environ.get("SCRAPE_TIMEOUT", "120"))  # seconds ( 2 min) — Google Maps Playwright scrape
 # =============================================================================
 
 # ---------------------------------------------------------------------------
