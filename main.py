@@ -397,101 +397,108 @@ async def get_build_log(slug: str, lines: int = 0):
 # 4. THE SCRAPER (Playwright)
 # ==========================================
 
+# Use a Semaphore to ensure we only run 1 Chrome instance at a time for scraping.
+# n8n might send 5 requests at once; this queues them neatly so the VPS doesn't crash.
+scrape_semaphore = asyncio.Semaphore(1)
+
 async def _do_scrape(query: str, max_results: int) -> dict:
     """Inner scrape logic — called inside a wait_for timeout wrapper."""
     results = []
 
-    async with async_playwright() as p:
-        # --no-sandbox is required for root/VPS environments without a GUI
-        browser = await p.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox']
-        )
-
-        # Inject the Google Consent Cookie to bypass the EU/Italy popup instantly.
-        context = await browser.new_context()
-        await context.add_cookies([{
-            "name": "SOCS",
-            "value": "CAESHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzEaAmVuIAEaBgiA_LyaBg",
-            "domain": ".google.com",
-            "path": "/"
-        }])
-
-        page = await context.new_page()
-
-        safe_query = urllib.parse.quote_plus(query)
-        # hl= keeps results in the configured language; cookie stops consent popup
-        url = f"https://www.google.com/maps/search/{safe_query}?hl={SITE_LANG}"
-
-        logger.info(f"🕵️ Scraping Maps for: {query}")
-        await page.goto(url)
-
-        # Wait for the listing feed to appear
-        try:
-            await page.wait_for_selector(
-                'a[href^="https://www.google.com/maps/place"]', timeout=10000
+    async with scrape_semaphore:
+        logger.info(f"🚦 Acquired scraper lock. Starting browser for: {query}")
+        async with async_playwright() as p:
+            # --no-sandbox is required for root/VPS environments without a GUI
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox']
             )
-        except Exception as e:
-            error_screenshot = os.path.join("logs", "scrape_error.png")
-            await page.screenshot(path=error_screenshot, full_page=True)
-            logger.error(f"❌ [SCRAPE] Failed to find listings for '{query}'. Screenshot saved to {error_screenshot}. Error: {e}")
+
+            # Inject the Google Consent Cookie to bypass the EU/Italy popup instantly.
+            context = await browser.new_context()
+            await context.add_cookies([{
+                "name": "SOCS",
+                "value": "CAESHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzEaAmVuIAEaBgiA_LyaBg",
+                "domain": ".google.com",
+                "path": "/"
+            }])
+
+            page = await context.new_page()
+
+            safe_query = urllib.parse.quote_plus(query)
+            # hl= keeps results in the configured language; cookie stops consent popup
+            url = f"https://www.google.com/maps/search/{safe_query}?hl={SITE_LANG}"
+
+            logger.info(f"🕵️ Scraping Maps for: {query}")
+            await page.goto(url)
+
+            # Wait for the listing feed to appear
+            try:
+                await page.wait_for_selector(
+                    'a[href^="https://www.google.com/maps/place"]', timeout=10000
+                )
+            except Exception as e:
+                error_screenshot = os.path.join("logs", "scrape_error.png")
+                await page.screenshot(path=error_screenshot, full_page=True)
+                logger.error(f"❌ [SCRAPE] Failed to find listings for '{query}'. Screenshot saved to {error_screenshot}. Error: {e}")
+                await browser.close()
+                return {"status": "error", "message": f"Could not find listings. Google might be blocking or DOM changed. See {error_screenshot}"}
+
+            listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
+
+            for i in range(min(max_results, len(listings))):
+                listing = listings[i]
+
+                # Click to open the detail panel
+                await listing.click()
+                await page.wait_for_timeout(2500)  # sidebar animation
+
+                name, phone, website, address = "", "", "", ""
+
+                try:
+                    name = await page.locator('h1.DUwDvf').first.inner_text()
+                except: pass
+
+                try:
+                    niche_element = page.locator('button.DkEaL').first
+                    raw_niche = await niche_element.inner_text()
+                    niche = clean_google_text(raw_niche)
+                except:
+                    # Fallback: use first word of the search query
+                    niche = query.split(" ")[0]
+
+                try:
+                    address_element = page.locator(
+                        'button[data-tooltip*="indirizzo" i], button[data-tooltip*="address" i]'
+                    ).first
+                    address = clean_google_text(await address_element.inner_text())
+                except: pass
+
+                try:
+                    phone_element = page.locator(
+                        'button[data-tooltip*="telefono" i], button[data-tooltip*="phone" i]'
+                    ).first
+                    phone = clean_google_text(await phone_element.inner_text())
+                except: pass
+
+                try:
+                    website_element = page.locator(
+                        'a[data-tooltip*="sito" i], a[data-tooltip*="website" i]'
+                    ).first
+                    website = await website_element.get_attribute('href')
+                except: pass
+
+                if name:
+                    results.append({
+                        "business_name": name,
+                        "niche": niche,
+                        "address": address,
+                        "tel": phone,
+                        "website": website
+                    })
+
             await browser.close()
-            return {"status": "error", "message": f"Could not find listings. Google might be blocking or DOM changed. See {error_screenshot}"}
-
-        listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
-
-        for i in range(min(max_results, len(listings))):
-            listing = listings[i]
-
-            # Click to open the detail panel
-            await listing.click()
-            await page.wait_for_timeout(2500)  # sidebar animation
-
-            name, phone, website, address = "", "", "", ""
-
-            try:
-                name = await page.locator('h1.DUwDvf').first.inner_text()
-            except: pass
-
-            try:
-                niche_element = page.locator('button.DkEaL').first
-                raw_niche = await niche_element.inner_text()
-                niche = clean_google_text(raw_niche)
-            except:
-                # Fallback: use first word of the search query
-                niche = query.split(" ")[0]
-
-            try:
-                address_element = page.locator(
-                    'button[data-tooltip*="indirizzo" i], button[data-tooltip*="address" i]'
-                ).first
-                address = clean_google_text(await address_element.inner_text())
-            except: pass
-
-            try:
-                phone_element = page.locator(
-                    'button[data-tooltip*="telefono" i], button[data-tooltip*="phone" i]'
-                ).first
-                phone = clean_google_text(await phone_element.inner_text())
-            except: pass
-
-            try:
-                website_element = page.locator(
-                    'a[data-tooltip*="sito" i], a[data-tooltip*="website" i]'
-                ).first
-                website = await website_element.get_attribute('href')
-            except: pass
-
-            if name:
-                results.append({
-                    "business_name": name,
-                    "niche": niche,
-                    "address": address,
-                    "tel": phone,
-                    "website": website
-                })
-
-        await browser.close()
+            logger.info(f"🚦 Releasing scraper lock for: {query}")
 
     return {"status": "success", "data": results}
 
