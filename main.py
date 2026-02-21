@@ -429,8 +429,12 @@ async def _do_scrape(query: str, max_results: int) -> dict:
             # hl= keeps results in the configured language; cookie stops consent popup
             url = f"https://www.google.com/maps/search/{safe_query}?hl={SITE_LANG}"
 
-            logger.info(f"🕵️ Scraping Maps for: {query}")
+            logger.info(f"🕵️ Scraping Maps for: {query} (URL: {url})")
             await page.goto(url)
+            logger.info(f"✅ Page loaded. Waiting for listings to appear...")
+
+            # Dump any browser console errors to our backend log (helpful if maps throws JS errors)
+            page.on("console", lambda msg: logger.debug(f"[BROWSER CONSOLE] {msg.type}: {msg.text}"))
 
             # Wait for the listing feed to appear
             try:
@@ -445,8 +449,10 @@ async def _do_scrape(query: str, max_results: int) -> dict:
                 return {"status": "error", "message": f"Could not find listings. Google might be blocking or DOM changed. See {error_screenshot}"}
 
             listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
+            found_count = len(listings)
+            logger.info(f"✅ Found {found_count} listing elements. Extracting up to {max_results}...")
 
-            for i in range(min(max_results, len(listings))):
+            for i in range(min(max_results, found_count)):
                 listing = listings[i]
 
                 # Click to open the detail panel
@@ -489,6 +495,7 @@ async def _do_scrape(query: str, max_results: int) -> dict:
                 except: pass
 
                 if name:
+                    logger.debug(f"ℹ️ Extracted [{i+1}/{max_results}]: {name} | {phone}")
                     results.append({
                         "business_name": name,
                         "niche": niche,
@@ -496,9 +503,11 @@ async def _do_scrape(query: str, max_results: int) -> dict:
                         "tel": phone,
                         "website": website
                     })
+                else:
+                    logger.warning(f"⚠️ Listing {i+1} failed to extract a business name.")
 
             await browser.close()
-            logger.info(f"🚦 Releasing scraper lock for: {query}")
+            logger.info(f"🚦 Releasing scraper lock for: {query}. Successfully extracted {len(results)} items.")
 
     return {"status": "success", "data": results}
 
