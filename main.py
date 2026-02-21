@@ -431,9 +431,12 @@ async def _do_scrape(query: str, max_results: int) -> dict:
             await page.wait_for_selector(
                 'a[href^="https://www.google.com/maps/place"]', timeout=10000
             )
-        except Exception:
+        except Exception as e:
+            error_screenshot = os.path.join("logs", "scrape_error.png")
+            await page.screenshot(path=error_screenshot, full_page=True)
+            logger.error(f"❌ [SCRAPE] Failed to find listings for '{query}'. Screenshot saved to {error_screenshot}. Error: {e}")
             await browser.close()
-            return {"status": "error", "message": "Could not find listings. Google might be blocking or DOM changed."}
+            return {"status": "error", "message": f"Could not find listings. Google might be blocking or DOM changed. See {error_screenshot}"}
 
         listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
 
