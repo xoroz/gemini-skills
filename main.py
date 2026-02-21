@@ -16,10 +16,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 # Setup Logging
 # ---------------------------------------------------------------------------
 os.makedirs("logs", exist_ok=True)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+# -- Main Backend Logger --
 logger = logging.getLogger("backend")
 logger.setLevel(logging.DEBUG)
-
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
 fh = RotatingFileHandler("logs/backend.log", maxBytes=5*1024*1024, backupCount=2)
 fh.setLevel(logging.DEBUG)
@@ -30,6 +31,17 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+
+# -- Dedicated Scraper Logger --
+# To avoid polluting backend.log with Maps JS errors
+scrape_logger = logging.getLogger("scraper")
+scrape_logger.setLevel(logging.DEBUG)
+
+sfh = RotatingFileHandler("logs/scrape.log", maxBytes=5*1024*1024, backupCount=2)
+sfh.setLevel(logging.DEBUG)
+sfh.setFormatter(formatter)
+scrape_logger.addHandler(sfh)
+scrape_logger.addHandler(ch)  # Also print to terminal
 
 # ---------------------------------------------------------------------------
 # Load .env if present (optional — system env vars always take precedence)
@@ -406,7 +418,7 @@ async def _do_scrape(query: str, max_results: int) -> dict:
     results = []
 
     async with scrape_semaphore:
-        logger.info(f"🚦 Acquired scraper lock. Starting browser for: {query}")
+        scrape_logger.info(f"🚦 Acquired scraper lock. Starting browser for: {query}")
         async with async_playwright() as p:
             # --no-sandbox is required for root/VPS environments without a GUI
             browser = await p.chromium.launch(
@@ -429,12 +441,12 @@ async def _do_scrape(query: str, max_results: int) -> dict:
             # hl= keeps results in the configured language; cookie stops consent popup
             url = f"https://www.google.com/maps/search/{safe_query}?hl={SITE_LANG}"
 
-            logger.info(f"🕵️ Scraping Maps for: {query} (URL: {url})")
+            scrape_logger.info(f"🕵️ Scraping Maps for: {query} (URL: {url})")
             await page.goto(url)
-            logger.info(f"✅ Page loaded. Waiting for listings to appear...")
+            scrape_logger.info(f"✅ Page loaded. Waiting for listings to appear...")
 
             # Dump any browser console errors to our backend log (helpful if maps throws JS errors)
-            page.on("console", lambda msg: logger.debug(f"[BROWSER CONSOLE] {msg.type}: {msg.text}"))
+            page.on("console", lambda msg: scrape_logger.debug(f"[BROWSER CONSOLE] {msg.type}: {msg.text}"))
 
             # Wait for the listing feed to appear
             try:
@@ -444,13 +456,13 @@ async def _do_scrape(query: str, max_results: int) -> dict:
             except Exception as e:
                 error_screenshot = os.path.join("logs", "scrape_error.png")
                 await page.screenshot(path=error_screenshot, full_page=True)
-                logger.error(f"❌ [SCRAPE] Failed to find listings for '{query}'. Screenshot saved to {error_screenshot}. Error: {e}")
+                scrape_logger.error(f"❌ [SCRAPE] Failed to find listings for '{query}'. Screenshot saved to {error_screenshot}. Error: {e}")
                 await browser.close()
                 return {"status": "error", "message": f"Could not find listings. Google might be blocking or DOM changed. See {error_screenshot}"}
 
             listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
             found_count = len(listings)
-            logger.info(f"✅ Found {found_count} listing elements. Extracting up to {max_results}...")
+            scrape_logger.info(f"✅ Found {found_count} listing elements. Extracting up to {max_results}...")
 
             for i in range(min(max_results, found_count)):
                 listing = listings[i]
@@ -495,7 +507,7 @@ async def _do_scrape(query: str, max_results: int) -> dict:
                 except: pass
 
                 if name:
-                    logger.debug(f"ℹ️ Extracted [{i+1}/{max_results}]: {name} | {phone}")
+                    scrape_logger.debug(f"ℹ️ Extracted [{i+1}/{max_results}]: {name} | {phone}")
                     results.append({
                         "business_name": name,
                         "niche": niche,
@@ -504,10 +516,10 @@ async def _do_scrape(query: str, max_results: int) -> dict:
                         "website": website
                     })
                 else:
-                    logger.warning(f"⚠️ Listing {i+1} failed to extract a business name.")
+                    scrape_logger.warning(f"⚠️ Listing {i+1} failed to extract a business name.")
 
             await browser.close()
-            logger.info(f"🚦 Releasing scraper lock for: {query}. Successfully extracted {len(results)} items.")
+            scrape_logger.info(f"🚦 Releasing scraper lock for: {query}. Successfully extracted {len(results)} items.")
 
     return {"status": "success", "data": results}
 
@@ -549,14 +561,14 @@ async def scrape_google_maps(
     else:
         effective_query = query.strip()
 
-    logger.info(f"🕵️ [SCRAPE] query='{effective_query}'  lang={SITE_LANG}  max_results={max_results}  timeout={SCRAPE_TIMEOUT}s")
+    scrape_logger.info(f"🕵️ [SCRAPE] query='{effective_query}'  lang={SITE_LANG}  max_results={max_results}  timeout={SCRAPE_TIMEOUT}s")
     try:
         return await asyncio.wait_for(
             _do_scrape(effective_query, max_results),
             timeout=SCRAPE_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        logger.warning(f"⏰ [SCRAPE] Timeout ({SCRAPE_TIMEOUT}s) hit for query: '{effective_query}'")
+        scrape_logger.warning(f"⏰ [SCRAPE] Timeout ({SCRAPE_TIMEOUT}s) hit for query: '{effective_query}'")
         raise HTTPException(
             status_code=504,
             detail=f"Scrape timed out after {SCRAPE_TIMEOUT // 60} minutes. "
