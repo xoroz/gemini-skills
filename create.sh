@@ -46,6 +46,12 @@ else
   IMG_MODEL="mockup (local .skel)"
   IMG_COST_EACH=0
 fi
+
+if [ "$MODE" = "DEV" ] || [ "$MODE" = "MOCKUP" ]; then
+  TEXT_MODEL="gemini-2.5-flash-lite"
+else
+  TEXT_MODEL="gemini-2.5-flash"
+fi
 # =============================================================================
 
 # 1. READ INPUTS
@@ -315,7 +321,7 @@ generate_text_with_retry() {
     err_file=$(mktemp)
 
     # Run gemini, redirecting stderr to temp file
-    if echo "$prompt" | gemini -y -p "" > "$output_file" 2> "$err_file"; then
+    if echo "$prompt" | gemini -m "$TEXT_MODEL" -y -p "" > "$output_file" 2> "$err_file"; then
       # Success? Check if the file is empty (sometimes gemini fails silently)
       if [ -s "$output_file" ]; then
         success=true
