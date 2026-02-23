@@ -247,7 +247,53 @@ def _site_slug(name: str) -> str:
     return s
 
 
+async def _take_screenshot(site_slug: str):
+    """Take a screenshot of the generated site using Playwright and save it."""
+    index_file = os.path.join("sites", site_slug, "index.html")
+    screenshot_path = os.path.join("sites", site_slug, "screenshot.png")
+    
+    if not os.path.exists(index_file):
+        return
+        
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox']
+            )
+            page = await browser.new_page(viewport={"width": 1280, "height": 900})
+            
+            abs_path = os.path.abspath(index_file)
+            await page.goto(f"file://{abs_path}", wait_until="networkidle", timeout=15000)
+            await page.screenshot(path=screenshot_path, full_page=True)
+            logger.info(f"📸 [BACKGROUND] Screenshot saved for '{site_slug}' at {screenshot_path}")
+            await browser.close()
+    except Exception as e:
+        logger.warning(f"⚠️ [BACKGROUND] Failed to take screenshot for '{site_slug}': {e}")
+
+
 async def build_site_and_notify(data: BusinessData):
+    site_slug = _site_slug(data.business_name)
+    site_dir = os.path.join("sites", site_slug)
+    index_file = os.path.join(site_dir, "index.html")
+    css_file = os.path.join(site_dir, "style.css")
+
+    # Check if files exist and are not empty
+    if os.path.exists(index_file) and os.path.getsize(index_file) > 0 and \
+       os.path.exists(css_file) and os.path.getsize(css_file) > 0:
+        logger.info(f"⏭️ [BACKGROUND] Site '{site_slug}' already exists and is complete. Skipping build.")
+        payload: dict = {"status": "success", "business_name": data.business_name}
+        if REMOTE_SITE_URL:
+            payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
+        else:
+            payload["site_slug"] = site_slug
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(data.webhook_url, json=payload)
+        except Exception as e:
+            logger.error(f"Failed to call webhook for cached site {site_slug}: {e}")
+        return
+
     script_path = "./create.sh"
     process = None
     try:
@@ -284,7 +330,9 @@ async def build_site_and_notify(data: BusinessData):
 
         if process.returncode == 0:
             logger.info(f"✅ [BACKGROUND] Success: {data.business_name}")
-            site_slug = _site_slug(data.business_name)
+            
+            await _take_screenshot(site_slug)
+            
             payload: dict = {"status": "success", "business_name": data.business_name}
             if REMOTE_SITE_URL:
                 payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
@@ -318,6 +366,7 @@ async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
     response: dict = {
         "status": "processing",
         "message": "Job added to queue.",
+        "job_id": site_slug,
         "site_slug": site_slug,
     }
     if REMOTE_SITE_URL:
@@ -402,6 +451,55 @@ async def get_build_log(slug: str, lines: int = 0):
         "build_status": build_status,
         "stats":        _parse_build_stats(full_log),
         "log":          raw,
+    }
+
+@app.get("/status/{job_id}", dependencies=[Depends(verify_token)], tags=["sites"])
+async def get_job_status(job_id: str):
+    """
+    Check the status of a site generation job using its job_id (which is its slug).
+    Returns the state without the full raw log (lighter than /build-log).
+    """
+    log_path = os.path.join("sites", job_id, "build.log")
+    index_file = os.path.join("sites", job_id, "index.html")
+    css_file = os.path.join("sites", job_id, "style.css")
+
+    # If already built (check cache-like files)
+    if os.path.exists(index_file) and os.path.getsize(index_file) > 0 and \
+       os.path.exists(css_file) and os.path.getsize(css_file) > 0:
+        stats = {}
+        if os.path.exists(log_path):
+            with open(log_path, "r", errors="replace") as f:
+                stats = _parse_build_stats(f.read())
+        return {
+            "job_id": job_id,
+            "status": "complete",
+            "message": "Site is fully built and ready.",
+            "stats": stats
+        }
+
+    # Otherwise parse the log to find state
+    if not os.path.exists(log_path):
+        return {
+            "job_id": job_id,
+            "status": "pending",
+            "message": "Job hasn't started yet or cannot be found."
+        }
+
+    with open(log_path, "r", errors="replace") as f:
+        full_log = f.read()
+
+    tail = full_log[-2000:]
+    if "🌐 Open:" in tail:
+        status = "complete"
+    elif "❌ Failed" in tail or "exit 1" in tail:
+        status = "failed"
+    else:
+        status = "in_progress"
+
+    return {
+        "job_id": job_id,
+        "status": status,
+        "stats": _parse_build_stats(full_log)
     }
 
 
@@ -524,6 +622,18 @@ async def _do_scrape(query: str, max_results: int) -> dict:
     return {"status": "success", "data": results}
 
 
+def _get_cache_path(query: str) -> str:
+    """Generate a safe, unique filename for a search query cache."""
+    # Basic slugification for the cache file name
+    safe_name = re.sub(r"[^a-z0-9]", "_", query.lower())
+    # Hash it to prevent overly long filenames if query is huge
+    import hashlib
+    hash_suffix = hashlib.md5(query.encode()).hexdigest()[:8]
+    
+    os.makedirs(".cache", exist_ok=True)
+    return os.path.join(".cache", f"scrape_{safe_name}_{hash_suffix}.json")
+
+
 @app.get("/scrape-maps", dependencies=[Depends(verify_token)], tags=["scraping"])
 async def scrape_google_maps(
     query: str = "",
@@ -561,12 +671,32 @@ async def scrape_google_maps(
     else:
         effective_query = query.strip()
 
+    # --- Cache Check ---
+    cache_file = _get_cache_path(effective_query)
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached_data = json.load(f)
+            scrape_logger.info(f"⚡ [SCRAPE] Cache hit for '{effective_query}'. Returning cached results.")
+            return cached_data
+        except Exception as e:
+            scrape_logger.warning(f"⚠️ [SCRAPE] Failed to read cache file {cache_file}: {e}")
+
     scrape_logger.info(f"🕵️ [SCRAPE] query='{effective_query}'  lang={SITE_LANG}  max_results={max_results}  timeout={SCRAPE_TIMEOUT}s")
     try:
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             _do_scrape(effective_query, max_results),
             timeout=SCRAPE_TIMEOUT,
         )
+        # --- Save to Cache ---
+        if result.get("status") == "success" and result.get("data"):
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                scrape_logger.warning(f"⚠️ [SCRAPE] Failed to write cache file {cache_file}: {e}")
+
+        return result
     except asyncio.TimeoutError:
         scrape_logger.warning(f"⏰ [SCRAPE] Timeout ({SCRAPE_TIMEOUT}s) hit for query: '{effective_query}'")
         raise HTTPException(

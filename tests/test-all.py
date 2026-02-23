@@ -331,7 +331,8 @@ def step_generate(biz: dict) -> str:
     """Returns the slug (business name slugified) used as site identifier."""
     name = biz["business_name"]
     print(f"\n{YELLOW}[Step 3] Trigger site build for \"{name}\"{NC}")
-    info("MODE=DEV → using sourceful/riverflow-v2-fast (cheap/fast images)")
+    mode_val = os.environ.get("MODE", "DEV")
+    info(f"MODE={mode_val}")
     info("API returns immediately; build runs in background.")
     print()
 
@@ -373,102 +374,41 @@ def step_generate(biz: dict) -> str:
     return site_slug
 
 
-# ─── Step 4a: LOCAL — Tail build log from filesystem ─────────────────────────
-def step_wait_local(site_slug: str):
-    site_dir = SITES_DIR / site_slug
-    log_file = site_dir / "build.log"
-    print(f"\n{YELLOW}[Step 4] Waiting for build to complete (LOCAL — tailing log){NC}")
-    info(f"Tailing: {log_file}")
-    info(f"Timeout: {BUILD_WAIT}s  (set BUILD_WAIT env to change)")
-    print()
-
-    deadline = time.time() + BUILD_WAIT
-    last_pos  = 0
-
-    # Wait for log file to appear (create.sh creates the folder first)
-    print(f"  {DIM}Waiting for build.log to appear...{NC}", end="", flush=True)
-    while not log_file.exists():
-        if time.time() > deadline:
-            print()
-            fail(f"build.log never appeared in {site_dir}", fatal=True)
-        time.sleep(2)
-        print(".", end="", flush=True)
-    print(f"  {GREEN}found{NC}")
-    print()
-
-    # Tail the log until we see the final "Open:" line
-    DONE_MARKER = "🌐 Open:"
-    done = False
-
-    while time.time() < deadline:
-        with open(log_file, "r", errors="replace") as f:
-            f.seek(last_pos)
-            chunk = f.read()
-            if chunk:
-                for line in chunk.splitlines():
-                    print(f"  {DIM}{line}{NC}")
-                last_pos += len(chunk.encode("utf-8", errors="replace"))
-                if DONE_MARKER in chunk:
-                    done = True
-                    break
-        time.sleep(1)
-
-    # Give the OS a moment to flush any final file writes
-    time.sleep(1)
-    print()
-    if done:
-        ok("Build completed (🌐 Open: marker detected in log)")
-    else:
-        fail(f"Build did not complete within {BUILD_WAIT}s", fatal=True)
-
-    return SITES_DIR / site_slug
-
-
-# ─── Step 4b: REMOTE — Poll live site URL every 20s ──────────────────────────
-def step_wait_remote(site_slug: str):
+# ─── Step 4: Wait for build via API ───────────────────────────────────────────
+def step_wait_api(site_slug: str):
     """
-    Remote build wait: polls REMOTE_SITE_URL/<slug>/index.html every 20s
-    until it returns HTTP 200 — meaning nginx is serving the finished site.
-    No fake /status/ endpoint needed.
+    Wait for build by polling the /status/{job_id} endpoint.
+    Works for both local and remote modes.
     """
-    site_url      = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
-    poll_interval = 20
-    deadline      = time.time() + BUILD_WAIT
-    start         = time.time()
-
-    print(f"\n{YELLOW}[Step 4] Waiting for build to complete (REMOTE — polling live URL){NC}")
-    info(f"Polling : {site_url}")
-    info(f"Interval: every {poll_interval}s")
+    print(f"\n{YELLOW}[Step 4] Waiting for build to complete (polling API){NC}")
+    info(f"Polling : {BASE_URL}/status/{site_slug}")
     info(f"Timeout : {BUILD_WAIT}s  (set BUILD_WAIT env to change)")
     print()
 
-    attempt = 0
+    deadline = time.time() + BUILD_WAIT
+    poll_interval = 5
+
     while time.time() < deadline:
-        attempt += 1
-        elapsed   = int(time.time() - start)
-        remaining = max(0, int(deadline - time.time()))
         try:
-            r = httpx.get(site_url, timeout=10)
+            r = httpx.get(f"{BASE_URL}/status/{site_slug}", headers=AUTH_HEADERS, timeout=5)
             if r.status_code == 200:
-                ok(f"Site is live! HTTP 200 after ~{elapsed}s  →  {site_url}")
-                return
+                data = r.json()
+                status = data.get("status")
+                if status == "complete":
+                    ok(f"Build completed! Site is ready.")
+                    return SITES_DIR / site_slug
+                elif status == "failed":
+                    fail("Build failed according to API!", fatal=True)
+                else:
+                    print(f"  {DIM}Status: {status} — still building...{NC}")
             else:
-                print(f"  {DIM}[#{attempt}  {elapsed}s elapsed / {remaining}s left]  "
-                      f"HTTP {r.status_code} — still building...{NC}")
-        except httpx.RequestError:
-            print(f"  {DIM}[#{attempt}  {elapsed}s elapsed / {remaining}s left]  "
-                  f"connection refused — server still building...{NC}")
+                warn(f"API returned {r.status_code} — continuing to poll")
         except Exception as e:
-            print(f"  {DIM}[#{attempt}  {elapsed}s elapsed / {remaining}s left]  "
-                  f"error: {e}{NC}")
+            warn(f"Error calling status API: {e} — continuing to poll")
 
-        # Sleep in 1s ticks so Ctrl-C is always responsive
-        for _ in range(poll_interval):
-            if time.time() >= deadline:
-                break
-            time.sleep(1)
+        time.sleep(poll_interval)
 
-    fail(f"Site did not come online within {BUILD_WAIT}s at {site_url}", fatal=True)
+    fail(f"Build did not complete within {BUILD_WAIT}s", fatal=True)
 
 
 # ─── Step 4.5: Fetch build log & stats ───────────────────────────────────────
@@ -794,7 +734,8 @@ def main():
         print(f"   .env    : Loaded (API_TOKEN={token_str})")
     print(f"   API     : {BASE_URL}")
     print(f"   Query   : {QUERY}")
-    print(f"   Mode    : DEV (forced — cheap images for testing)")
+    mode_val = os.environ.get("MODE", "DEV")
+    print(f"   Mode    : {mode_val}")
     if REMOTE:
         print(f"   Remote  : {BOLD}{YELLOW}ON{NC} — local filesystem steps will be SKIPPED")
         print(f"   Site URL: {REMOTE_SITE_URL}/<slug>/index.html")
@@ -816,10 +757,7 @@ def main():
     sep()
 
     # Step 4: Wait for build
-    if REMOTE:
-        step_wait_remote(site_slug)
-    else:
-        site_dir = step_wait_local(site_slug)
+    site_dir = step_wait_api(site_slug)
     sep()
 
     # Step 4.5: Fetch build log & stats from API (both modes)

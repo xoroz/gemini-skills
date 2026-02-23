@@ -34,14 +34,17 @@ REMOTE_SITE_URL="${REMOTE_SITE_URL%/}"  # strip trailing slash if any
 # =============================================================================
 # IMAGE MODEL & PRICING — edit these when rates change
 # =============================================================================
-#MODE="${MODE:-PROD}"   # DEV = cheap/fast,  PROD = quality
-MODE="DEV"
+MODE="${MODE:-DEV}"  # DEV = cheap/fast, PROD = quality, MOCKUP = skip billing
+
 if [ "$MODE" = "DEV" ]; then
   IMG_MODEL="black-forest-labs/flux.2-klein-4b"
   IMG_COST_EACH=0.014
-else
+elif [ "$MODE" = "PROD" ]; then
   IMG_MODEL="google/gemini-2.5-flash-image"
   IMG_COST_EACH=0.038   # ~$0.030/img via OpenRouter
+else
+  IMG_MODEL="mockup (local .skel)"
+  IMG_COST_EACH=0
 fi
 # =============================================================================
 
@@ -167,6 +170,13 @@ for IMG_NAME in "${!IMAGES[@]}"; do
   
   echo "  🖼️  [$IMG_COUNT/$IMG_TOTAL] Generating: assets/${IMG_NAME}.png"
   
+  if [ "$MODE" = "MOCKUP" ]; then
+    cp "$SCRIPT_DIR/.skel/assets/dummy.png" "$IMG_PATH" || touch "$IMG_PATH"
+    echo "     ✅ Copied dummy mockup image"
+    IMAGES_GENERATED=$((IMAGES_GENERATED + 1))
+    continue
+  fi
+
   # Retry loop with exponential backoff for rate limits
   MAX_RETRIES=2
   RETRY=0
