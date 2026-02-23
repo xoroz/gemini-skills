@@ -623,16 +623,20 @@ async def _do_scrape(query: str, max_results: int) -> dict:
     return {"status": "success", "data": results}
 
 
-def _get_cache_path(query: str) -> str:
-    """Generate a safe, unique filename for a search query cache."""
-    # Basic slugification for the cache file name
-    safe_name = re.sub(r"[^a-z0-9]", "_", query.lower())
-    # Hash it to prevent overly long filenames if query is huge
+def _get_cache_path(query: str, max_results: int) -> str:
+    """Generate a safe, unique filename for a search query + quantity cache.
+
+    max_results is included in the key so that a cache entry for N results
+    is never served to a request asking for more than N.
+    """
     import hashlib
-    hash_suffix = hashlib.md5(query.encode()).hexdigest()[:8]
-    
+    safe_name = re.sub(r"[^a-z0-9]", "_", query.lower())
+    # Include max_results in the hash so different quantities get separate files
+    hash_input = f"{query}|max={max_results}"
+    hash_suffix = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+
     os.makedirs(".cache", exist_ok=True)
-    return os.path.join(".cache", f"scrape_{safe_name}_{hash_suffix}.json")
+    return os.path.join(".cache", f"scrape_{safe_name}_n{max_results}_{hash_suffix}.json")
 
 
 @app.get("/scrape-maps", dependencies=[Depends(verify_token)], tags=["scraping"])
@@ -673,13 +677,28 @@ async def scrape_google_maps(
         effective_query = query.strip()
 
     # --- Cache Check ---
-    cache_file = _get_cache_path(effective_query)
+    # Key includes max_results so a cache with fewer items never silently
+    # satisfies a request that asked for more.
+    cache_file = _get_cache_path(effective_query, max_results)
     if os.path.exists(cache_file):
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
                 cached_data = json.load(f)
-            scrape_logger.info(f"⚡ [SCRAPE] Cache hit for '{effective_query}'. Returning cached results.")
-            return cached_data
+            cached_items = cached_data.get("data", [])
+            if len(cached_items) >= max_results:
+                # Slice to exactly what was requested (cache may contain more
+                # if a larger query was saved earlier under the same hash).
+                cached_data["data"] = cached_items[:max_results]
+                scrape_logger.info(
+                    f"⚡ [SCRAPE] Cache hit for '{effective_query}' "
+                    f"({len(cached_data['data'])}/{max_results} results). Returning cached results."
+                )
+                return cached_data
+            else:
+                scrape_logger.info(
+                    f"⚡ [SCRAPE] Cache stale for '{effective_query}': "
+                    f"has {len(cached_items)} results but {max_results} requested — running fresh scrape."
+                )
         except Exception as e:
             scrape_logger.warning(f"⚠️ [SCRAPE] Failed to read cache file {cache_file}: {e}")
 

@@ -326,6 +326,99 @@ def step_scrape() -> dict:
     return biz
 
 
+# ─── Step 2.5: Quantity cap & cache invalidation tests ──────────────────────────
+def step_scrape_cache_and_qty():
+    """
+    Regression tests for two bugs fixed in main.py:
+      Bug 1 — max_results not respected (API returned more than requested)
+      Bug 2 — cache ignores quantity (stale cache served fewer/wrong results)
+
+    Strategy
+    --------
+    Pass A  max_results=2  → populates cache, asserts ≤2 results returned
+    Pass B  max_results=2  → should be instant cache hit, still ≤2 results
+    Pass C  max_results=3  → cache entry for N=2 must NOT be returned;
+                             a fresh scrape fires and returns ≤3 results
+    """
+    print(f"\n{YELLOW}[Step 2.5] Quantity cap & cache invalidation regression tests{NC}")
+
+    # Build params — reuse the configured query so we don't trigger a 3rd Maps search topic
+    if BUSINESS_TYPE and LOCATION:
+        base_params: dict = {"business_type": BUSINESS_TYPE, "location": LOCATION}
+    else:
+        base_params = {"query": QUERY}
+
+    def _scrape(n: int, label: str) -> tuple[list, float]:
+        params = {**base_params, "max_results": n}
+        t0 = time.monotonic()
+        try:
+            r = httpx.get(
+                f"{BASE_URL}/scrape-maps",
+                params=params,
+                headers=AUTH_HEADERS,
+                timeout=140,
+            )
+            elapsed = time.monotonic() - t0
+            if r.status_code != 200:
+                fail(f"{label}: HTTP {r.status_code}", fatal=False)
+                return [], elapsed
+            return r.json().get("data", []), elapsed
+        except Exception as exc:
+            fail(f"{label}: request error — {exc}", fatal=False)
+            return [], time.monotonic() - t0
+
+    # ── Pass A: first call seeds the cache ──────────────────────────────────────
+    info("Pass A — max_results=2 (seeds cache)")
+    items_a, dur_a = _scrape(2, "Pass A")
+    info(f"  Got {len(items_a)} result(s) in {dur_a:.1f}s")
+    if len(items_a) <= 2:
+        ok(f"Pass A: quantity cap respected ({len(items_a)} ≤ 2)")
+    else:
+        fail(f"Pass A: got {len(items_a)} results — expected ≤2 (quantity cap bug!)")
+
+    # ── Pass B: same query + same N → should hit cache and return instantly ──────
+    info("Pass B — max_results=2 (should be cache hit)")
+    items_b, dur_b = _scrape(2, "Pass B")
+    info(f"  Got {len(items_b)} result(s) in {dur_b:.1f}s")
+    if len(items_b) <= 2:
+        ok(f"Pass B: quantity cap respected ({len(items_b)} ≤ 2)")
+    else:
+        fail(f"Pass B: got {len(items_b)} results — expected ≤2 (quantity cap bug!)")
+    # Cache hit is typically <1 s; scrape takes 10-120 s. A 5-second ceiling is generous.
+    CACHE_HIT_THRESHOLD = 5.0
+    if dur_b < CACHE_HIT_THRESHOLD:
+        ok(f"Pass B: cache hit confirmed ({dur_b:.1f}s < {CACHE_HIT_THRESHOLD}s threshold)")
+    else:
+        warn(f"Pass B: took {dur_b:.1f}s — slower than expected for a cache hit. "
+             "Network latency or server load may explain this.")
+
+    # ── Pass C: larger quantity → cache for N=2 must NOT be served ──────────────
+    info("Pass C — max_results=3 (must bypass N=2 cache and scrape fresh)")
+    items_c, dur_c = _scrape(3, "Pass C")
+    info(f"  Got {len(items_c)} result(s) in {dur_c:.1f}s")
+    if len(items_c) <= 3:
+        ok(f"Pass C: quantity cap respected ({len(items_c)} ≤ 3)")
+    else:
+        fail(f"Pass C: got {len(items_c)} results — expected ≤3 (quantity cap bug!)")
+    # If the N=2 cache was incorrectly served, we'd get ≤2 items instantly.
+    # A fresh scrape always takes > CACHE_HIT_THRESHOLD seconds.
+    if dur_c >= CACHE_HIT_THRESHOLD:
+        ok(f"Pass C: fresh scrape triggered as expected ({dur_c:.1f}s ≥ {CACHE_HIT_THRESHOLD}s)")
+    else:
+        # Either the server was very fast OR the old (wrong) cache was returned
+        if len(items_c) <= 2 and len(items_a) >= 2:
+            fail(
+                f"Pass C: got {len(items_c)} items in {dur_c:.1f}s — "
+                "looks like the N=2 cache was served instead of a fresh scrape! "
+                "(cache-bypass bug may still be present)"
+            )
+        else:
+            warn(
+                f"Pass C: completed in {dur_c:.1f}s (faster than threshold). "
+                "Could be a very fast network or a warm Maps response."
+            )
+
+
 # ─── Step 3: Trigger build ────────────────────────────────────────────────────
 def step_generate(biz: dict) -> str:
     """Returns the slug (business name slugified) used as site identifier."""
@@ -750,6 +843,10 @@ def main():
 
     # Step 2: Scrape (always runs — it's just an API call)
     biz = step_scrape()
+    sep()
+
+    # Step 2.5: Quantity cap & cache invalidation regression tests
+    step_scrape_cache_and_qty()
     sep()
 
     # Step 3: Trigger build (always runs — it's just an API call)
