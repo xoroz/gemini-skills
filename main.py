@@ -273,6 +273,45 @@ async def _take_screenshot(site_slug: str):
         logger.warning(f"⚠️ [BACKGROUND] Failed to take screenshot for '{site_slug}': {e}")
 
 
+async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_delay: float = 0.0) -> None:
+    """
+    POST payload to webhook_url with retry logic.
+
+    initial_delay — seconds to wait before the FIRST attempt.
+                    Use this for cache-hit paths where n8n's Wait node
+                    may not have finished registering its listener yet.
+    Retries up to 3 times with 3-second backoff on any error.
+    """
+    if initial_delay > 0:
+        logger.info(f"⏳ [WEBHOOK] Waiting {initial_delay}s before calling {label} webhook (race-condition guard)")
+        await asyncio.sleep(initial_delay)
+
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):  # 3 attempts
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(webhook_url, json=payload)
+                if r.status_code < 400:
+                    logger.info(f"✅ [WEBHOOK] {label} → HTTP {r.status_code} (attempt {attempt})")
+                    return
+                else:
+                    logger.warning(
+                        f"⚠️ [WEBHOOK] {label} → HTTP {r.status_code} on attempt {attempt}: {r.text[:200]}"
+                    )
+                    last_exc = Exception(f"HTTP {r.status_code}: {r.text[:200]}")
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                f"⚠️ [WEBHOOK] {label} → attempt {attempt} failed: {type(exc).__name__}: {exc!r}"
+            )
+        if attempt < 3:
+            await asyncio.sleep(3)  # backoff before retry
+
+    logger.error(
+        f"❌ [WEBHOOK] {label} → all 3 attempts failed. Last error: {type(last_exc).__name__}: {last_exc!r}"
+    )
+
+
 async def build_site_and_notify(data: BusinessData):
     site_slug = _site_slug(data.business_name)
     site_dir = os.path.join("sites", site_slug)
@@ -288,11 +327,10 @@ async def build_site_and_notify(data: BusinessData):
             payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
         else:
             payload["site_slug"] = site_slug
-        try:
-            async with httpx.AsyncClient() as client:
-                await client.post(data.webhook_url, json=payload)
-        except Exception as e:
-            logger.error(f"Failed to call webhook for cached site {site_slug}: {e}")
+        # Delay before firing: n8n's Wait node needs ~1-2s to register its listener
+        # after the /generate-site response is received. Cache hits are instant,
+        # so without this delay the webhook fires before n8n is ready.
+        await _post_webhook(data.webhook_url, payload, f"cache-hit/{site_slug}", initial_delay=2.0)
         return
 
     script_path = "./create.sh"
@@ -325,8 +363,7 @@ async def build_site_and_notify(data: BusinessData):
                 "business_name": data.business_name,
                 "error": f"Build exceeded {BUILD_TIMEOUT // 60}-minute timeout and was killed.",
             }
-            async with httpx.AsyncClient() as client:
-                await client.post(data.webhook_url, json=payload)
+            await _post_webhook(data.webhook_url, payload, f"timeout/{site_slug}")
             return
 
         if process.returncode == 0:
@@ -345,15 +382,17 @@ async def build_site_and_notify(data: BusinessData):
             payload = {"status": "error", "error": err_text}
 
         # Send result back to n8n Webhook
-        async with httpx.AsyncClient() as client:
-            await client.post(data.webhook_url, json=payload)
+        await _post_webhook(data.webhook_url, payload, f"build/{site_slug}")
 
     except Exception as e:
         logger.error(f"🔥 [BACKGROUND] Unexpected error: {e}")
         if process is not None:
             _kill_process_group(process)
-        async with httpx.AsyncClient() as client:
-            await client.post(data.webhook_url, json={"status": "error", "error": str(e)})
+        await _post_webhook(
+            data.webhook_url,
+            {"status": "error", "error": str(e)},
+            f"exception/{site_slug}",
+        )
 
 @app.post("/generate-site", dependencies=[Depends(verify_token)], tags=["sites"])
 async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
