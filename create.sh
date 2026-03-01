@@ -205,7 +205,7 @@ case "$SITE_LANG" in
 esac
 
 # 3. CREATE FOLDER STRUCTURE (inside sites/)
-SITE_SLUG=$(echo "$BUSINESS_NAME" | sed -e 's/ /-/g' | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-')
+SITE_SLUG=$(echo "$BUSINESS_NAME" | sed -e 's/ /-/g' | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-' | sed -E 's/--+/-/g' | sed -E 's/^-|-$//g')
 FOLDER_NAME="sites/$SITE_SLUG"
 LOG_FILE="$FOLDER_NAME/build.log"
 
@@ -460,10 +460,23 @@ if ! generate_text_with_retry "$PROMPT" "$FOLDER_NAME/index.html" "HTML"; then
   exit 1
 fi
 
-# Strip any AI preamble before <!DOCTYPE
-if ! head -1 "$FOLDER_NAME/index.html" | grep -q "<!DOCTYPE"; then
-  sed -i -n '/<!DOCTYPE/,$p' "$FOLDER_NAME/index.html"
-fi
+# Safely extract the actual HTML block, stripping all AI conversational preamble
+python3 -c '
+import sys
+content = sys.stdin.read()
+if "```html" in content:
+    try:
+        content = content.split("```html", 1)[1].split("```", 1)[0]
+    except IndexError:
+        pass
+elif "<!DOCTYPE" in content:
+    content = "<!DOCTYPE" + content.split("<!DOCTYPE", 1)[1]
+elif "<html" in content:
+    content = "<html" + content.split("<html", 1)[1]
+# Remove trailing markdown ticks if any leaked out
+content = content.replace("```", "")
+print(content.strip())
+' < "$FOLDER_NAME/index.html" > "$FOLDER_NAME/index.html.tmp" && mv "$FOLDER_NAME/index.html.tmp" "$FOLDER_NAME/index.html"
 
 HTML_SIZE=$(wc -c < "$FOLDER_NAME/index.html" 2>/dev/null || echo 0)
 if [ "$HTML_SIZE" -eq 0 ]; then
@@ -471,8 +484,14 @@ if [ "$HTML_SIZE" -eq 0 ]; then
   exit 1
 fi
 
+echo "🔍 Verifying HTML integrity..."
+if ! grep -qi "<html" "$FOLDER_NAME/index.html" || ! grep -qi "</html" "$FOLDER_NAME/index.html"; then
+  echo "❌ Error: index.html is severely malformed (missing root tags)."
+  exit 1
+fi
+
 HTML_SIZE_STR=$(numfmt --to=iec "$HTML_SIZE" 2>/dev/null || echo "${HTML_SIZE}B")
-echo "✅ index.html created! ($HTML_SIZE_STR)"
+echo "✅ index.html created and validated! ($HTML_SIZE_STR)"
 
 # 7. GENERATE CSS (fed with actual HTML for class name matching)
 GENERATED_HTML=$(cat "$FOLDER_NAME/index.html")
@@ -639,6 +658,15 @@ if [ -n "$REMOTE_SITE_URL" ]; then
   SITE_PUBLIC_URL="$REMOTE_SITE_URL/$SITE_SLUG/index.html"
   echo "  🌐 Open: $SITE_PUBLIC_URL"
   echo "  📂 Local: file://$SCRIPT_DIR/$FOLDER_NAME/index.html"
+  
+  echo -n "  📡 Testing remote live URL... "
+  # Wait briefly for web server (Caddy/Nginx) to detect the new file
+  sleep 1
+  if curl -s -f -m 10 "$SITE_PUBLIC_URL" > /dev/null; then
+    echo "[OK]"
+  else
+    echo "[ERROR] - URL not serving a 200 OK (Yet?)"
+  fi
 else
   SITE_PUBLIC_URL="N/A (Local build)"
   echo "  🌐 Open: open $FOLDER_NAME/index.html"
