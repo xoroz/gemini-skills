@@ -52,6 +52,20 @@ send_build_summary() {
         assets_sz_str=$(numfmt --to=iec $sz 2>/dev/null || echo "${sz}B")
     fi
 
+    local log_content=""
+    if [ -f "${LOG_FILE:-}" ] && [ -s "${LOG_FILE:-}" ]; then
+        log_content=$(cat "$LOG_FILE")
+    fi
+
+    # Zip the site directory
+    local zip_file=""
+    if [ -n "$FOLDER_NAME" ] && [ -d "$FOLDER_NAME" ]; then
+        zip_file="${FOLDER_NAME}.zip"
+        local parent_dir=$(dirname "$FOLDER_NAME")
+        local base_dir=$(basename "$FOLDER_NAME")
+        (cd "$parent_dir" && zip -qr "${base_dir}.zip" "$base_dir")
+    fi
+
     # Format body
     local body="
     🚀 Build Summary ($status): ${BUSINESS_NAME:-"Unknown"}
@@ -72,12 +86,13 @@ send_build_summary() {
     
     🖨️ Flyer    : assets/flyers/${FLYER_NAME:-"N/A"}
     ═══════════════════════════════════════════════
-    Build log: ${LOG_FILE:-"N/A"} (attached if exists)
+    Build log:
+    ${log_content}
     "
 
     # Send via python utility
     local mail_args=("$from" "$to" "$subject" "$body")
-    if [ -f "${LOG_FILE:-}" ]; then mail_args+=("$LOG_FILE"); fi
+    if [ -n "$zip_file" ] && [ -f "$zip_file" ]; then mail_args+=("$zip_file"); fi
 
     uv run "$MAIL_SCRIPT" "${mail_args[@]}" | sed 's/^/   /'
     echo "✅ Email notification sent!"
@@ -93,7 +108,7 @@ on_error() {
         send_build_summary "FAILED"
     fi
 }
-trap on_error EXIT
+# Trap will be enabled after input validation
 # =============================================================================
 
 
@@ -205,8 +220,18 @@ case "$SITE_LANG" in
 esac
 
 # 3. CREATE FOLDER STRUCTURE (inside sites/)
+# Now that we have validated inputs, enable the error reporting trap
+trap on_error EXIT
+
 SITE_SLUG=$(echo "$BUSINESS_NAME" | sed -e 's/ /-/g' | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-' | sed -E 's/--+/-/g' | sed -E 's/^-|-$//g')
 FOLDER_NAME="sites/$SITE_SLUG"
+
+if [ -d "$FOLDER_NAME" ]; then
+  echo "⚠️  Folder $FOLDER_NAME already exists. Renaming to ${FOLDER_NAME}_old..."
+  rm -rf "${FOLDER_NAME}_old"
+  mv "$FOLDER_NAME" "${FOLDER_NAME}_old"
+fi
+
 LOG_FILE="$FOLDER_NAME/build.log"
 
 mkdir -p "$FOLDER_NAME/assets"
@@ -282,6 +307,13 @@ for IMG_NAME in "${!IMAGES[@]}"; do
     EXIT_CODE=$?
 
     if [ $EXIT_CODE -eq 0 ]; then
+      IMG_SIZE=$(stat -c%s "$IMG_PATH" 2>/dev/null || stat -f%z "$IMG_PATH" 2>/dev/null || echo 0)
+      if [ "$IMG_SIZE" -lt 5000 ]; then
+        echo "     ❌ Error: Image ${IMG_NAME}.png is invalid (size too small: $IMG_SIZE bytes)."
+        # Break out of retry loop but leave SUCCESS=false
+        break
+      fi
+
       echo "$OUTPUT" | sed 's/^/     /'
       SUCCESS=true
       IMAGES_GENERATED=$((IMAGES_GENERATED + 1))
@@ -327,6 +359,12 @@ done
 echo ""
 echo "✅ Images done! ($IMAGES_GENERATED/$IMG_TOTAL generated, $IMAGES_FAILED failed)"
 echo ""
+
+if [ "$IMAGES_FAILED" -gt 0 ]; then
+  echo "❌ Error: $IMAGES_FAILED image(s) failed to generate correctly (or sizes were invalid). Aborting build."
+  exit 1
+fi
+
 
 # 6. GENERATE HTML
 PROMPT="
