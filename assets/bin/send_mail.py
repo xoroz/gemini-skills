@@ -83,9 +83,16 @@ def _resolve_body(body_arg: str) -> tuple[str, bool]:
     If body_arg is a path to an existing .html file, read and return it
     as (content, is_html=True).  Otherwise treat it as literal text.
     """
-    p = Path(body_arg)
-    if p.is_file() and p.suffix.lower() in (".html", ".htm"):
-        return p.read_text(encoding="utf-8"), True
+    # Safety check: if the string is very long or contains newlines, 
+    # it's definitely not a file path. This avoids 'File name too long' errors.
+    if len(body_arg) < 1024 and "\n" not in body_arg:
+        try:
+            p = Path(body_arg)
+            if p.is_file() and p.suffix.lower() in (".html", ".htm"):
+                return p.read_text(encoding="utf-8"), True
+        except OSError:
+            pass
+
     # Detect inline HTML heuristic
     stripped = body_arg.lstrip()
     if stripped.startswith("<") and ("</") in body_arg:

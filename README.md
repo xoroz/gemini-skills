@@ -5,9 +5,9 @@
 A mono-repo that ships two tightly-coupled tools:
 
 | Component | What it does |
-|-----------|-------------|
+|-----------|--------------|
 | **Gemini CLI Extension** | Adds AI skills (image generation, frontend design) to the [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
-| **Review Site Factory** | FastAPI server that scrapes Google Maps with Playwright and auto-generates local-business landing pages using `create.sh` + Gemini CLI |
+| **Review Site Factory** | FastAPI server that auto-generates landing pages, personalized A5 flyers with QR codes, and sends email build summaries via SMTP. |
 
 > **Why one repo?** `create.sh` (the site builder) directly calls the `nano-banana-pro` skill to generate images. Splitting would require publishing the skill as a separate package and adding a dependency layer. The coupling is intentional — keep them together until the skill is stable enough to version independently.
 
@@ -33,7 +33,7 @@ A mono-repo that ships two tightly-coupled tools:
 ## 1. Prerequisites
 
 | Tool | Version | Notes |
-|------|---------|-------|
+| :--- | :--- | :--- |
 | Python | 3.9.x | `python3 --version` (tested on 3.9.25) |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | latest | `gemini --version` |
 | curl | any | for API tests |
@@ -130,7 +130,7 @@ python test-playwright.py
 
 Expected output:
 
-```
+```text
 🚀 Starting Playwright test...
 ⏳ Launching headless Chromium...
 🌐 Navigating to example.com...
@@ -163,6 +163,12 @@ export GEMINI_API_KEY="your-google-ai-studio-key"
 
 # Fallback — uses google/gemini-2.5-flash-image via OpenRouter
 export OPENROUTER_API_KEY="your-openrouter-key"
+
+# Outgoing Mail (Review Site Factory notifications)
+export SMTP_HOST="ssl0.ovh.net"
+export SMTP_PORT="587"
+export SMTP_USER="[email protected]"
+export SMTP_PASS="your-password"
 ```
 
 Get a free Gemini API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
@@ -290,6 +296,25 @@ MODE=DEV SITE_LANG=en ./create.sh "Joe's Garage" "auto repair" "123 Main St" "55
 ```
 
 Output is written to `sites/<business-slug>/` (ignored by `.gitignore`).
+
+### 7.1 Flyer Generation (Integrated)
+
+Every time a site is built, `create.sh` automatically:
+
+1. Generates a QR code linking to the site.
+2. Stamps it onto the `assets/template-flyer.png`.
+3. Saves a personalized A5 flyer in `sites/<slug>/assets/` and `assets/flyers/`.
+
+### 7.2 Email Notifications
+
+Build completions (and failures) trigger an automatic email summary to `info@texngo.it` using the `SMTP_*` credentials in your `.env`.
+
+**Manual Mailer Usage:**
+
+```bash
+# General purpose SMTP utility
+python assets/bin/send_mail.py [email protected] [email protected] "Subject" "Body or path/to/index.html" [/path/to/attachment]
+```
 
 > **Pre-flight checks in `create.sh`:** The script verifies that `gemini` CLI is available and that at least one API key is set before doing any work.
 
@@ -420,7 +445,7 @@ Expected response shape:
 
 ## 10. Repository structure
 
-```
+```text
 gemini-skills/
 │
 ├── gemini-extension.json     # Gemini CLI extension manifest

@@ -10,8 +10,92 @@
 #   MODE=DEV ./create.sh "Test Salon" "parrucchiere" "Via Test 1" "+39 000"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- 0. ENV & PATH SETUP ---
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:$PATH"
+
+# Auto-detect node/npm from NVM if available
+if [ -d "$HOME/.nvm" ]; then
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+fi
+
+# Ensure gemini-cli is in path
+if ! command -v gemini &> /dev/null; then
+    # Last ditch attempt: check common nvm bin path pattern
+    NVM_BIN=$(ls -d $HOME/.nvm/versions/node/*/bin 2>/dev/null | tail -n1 || echo "")
+    if [ -n "$NVM_BIN" ]; then export PATH="$NVM_BIN:$PATH"; fi
+fi
+
 IMAGE_SCRIPT="$SCRIPT_DIR/skills/nano-banana-pro/scripts/image.py"
+MAIL_SCRIPT="$SCRIPT_DIR/assets/bin/send_mail.py"
+
+# =============================================================================
+# NOTIFICATION HELPER (needs to be defined before trap)
+# =============================================================================
+send_build_summary() {
+  local status="$1"
+  local emoji="✅"
+  if [[ "$status" == "FAILED" ]]; then emoji="❌"; fi
+
+  if [ -f "$MAIL_SCRIPT" ]; then
+    echo "📩 Sending build summary email..."
+    
+    local subject="$emoji Build $status: $BUSINESS_NAME"
+    local from="info@texngo.it"
+    local to="info@texngo.it"
+    
+    # Check stats info availability
+    local assets_sz_str="N/A"
+    if [ -d "$FOLDER_NAME/assets" ]; then
+        local sz=$(du -sb "$FOLDER_NAME/assets" 2>/dev/null | cut -f1 || echo 0)
+        assets_sz_str=$(numfmt --to=iec $sz 2>/dev/null || echo "${sz}B")
+    fi
+
+    # Format body
+    local body="
+    🚀 Build Summary ($status): ${BUSINESS_NAME:-"Unknown"}
+    ═══════════════════════════════════════════════
+    🏢 Business : ${BUSINESS_NAME:-"Unknown"}
+    🏷️ Niche    : ${NICHE:-"Unknown"}
+    📍 Address  : ${ADDRESS:-"Unknown"}
+    📞 Contact  : ${CONTACT:-"Unknown"}
+    🏗️ Mode     : ${MODE:-"DEV"}
+    🌐 Site URL : ${SITE_PUBLIC_URL:-"N/A"}
+    
+    📊 Stats
+    ─────────────
+    ⏱️ Time     : ${MINUTES:-"0"}m ${SECONDS:-"0"}s
+    🖼️ Images   : ${IMAGES_GENERATED:-0} / ${IMG_TOTAL:-6}
+    💰 Cost     : \$${TOTAL_COST:-"N/A"}
+    📁 Assets   : $assets_sz_str
+    
+    🖨️ Flyer    : assets/flyers/${FLYER_NAME:-"N/A"}
+    ═══════════════════════════════════════════════
+    Build log: ${LOG_FILE:-"N/A"} (attached if exists)
+    "
+
+    # Send via python utility
+    local mail_args=("$from" "$to" "$subject" "$body")
+    if [ -f "${LOG_FILE:-}" ]; then mail_args+=("$LOG_FILE"); fi
+
+    uv run "$MAIL_SCRIPT" "${mail_args[@]}" | sed 's/^/   /'
+    echo "✅ Email notification sent!"
+  fi
+}
+
+on_error() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "❌ Script failed with exit code $exit_code. Sending error email..."
+        # Avoid trap loops
+        trap - EXIT
+        send_build_summary "FAILED"
+    fi
+}
+trap on_error EXIT
+# =============================================================================
+
 
 # Load .env if present (system env vars always win)
 if [ -f "$SCRIPT_DIR/.env" ]; then
@@ -321,6 +405,11 @@ generate_text_with_retry() {
     err_file=$(mktemp)
 
     # Run gemini, redirecting stderr to temp file
+    if ! command -v gemini &> /dev/null; then
+      echo "❌ Error: gemini command not found in PATH." > "$err_file"
+      return 1
+    fi
+
     if echo "$prompt" | gemini -m "$TEXT_MODEL" -y -p "" > "$output_file" 2> "$err_file"; then
       # Success? Check if the file is empty (sometimes gemini fails silently)
       if [ -s "$output_file" ]; then
@@ -377,6 +466,11 @@ if ! head -1 "$FOLDER_NAME/index.html" | grep -q "<!DOCTYPE"; then
 fi
 
 HTML_SIZE=$(wc -c < "$FOLDER_NAME/index.html" 2>/dev/null || echo 0)
+if [ "$HTML_SIZE" -eq 0 ]; then
+  echo "❌ Error: index.html is empty after cleaning."
+  exit 1
+fi
+
 HTML_SIZE_STR=$(numfmt --to=iec "$HTML_SIZE" 2>/dev/null || echo "${HTML_SIZE}B")
 echo "✅ index.html created! ($HTML_SIZE_STR)"
 
@@ -477,11 +571,11 @@ ASSETS_SIZE=$(du -sb "$FOLDER_NAME/assets" 2>/dev/null | cut -f1 || echo 0)
 TOTAL_SIZE=$(du -sb "$FOLDER_NAME" 2>/dev/null | cut -f1 || echo 0)
 
 # Cost estimation
-# OpenRouter images: ~$0.03 each
-# Gemini API images: free tier / included in plan
-# Gemini CLI (text): minimal cost for prompt+completion
-OPENROUTER_IMG_COST=$(echo "$IMAGES_VIA_OPENROUTER * $IMG_COST_EACH" | bc 2>/dev/null || echo "0")
-GEMINI_TEXT_COST="~0.01"  # rough estimate for 2 text generation calls
+OPENROUTER_IMG_COST=$(echo "${IMAGES_VIA_OPENROUTER:-0} * ${IMG_COST_EACH:-0}" | bc 2>/dev/null || echo "0")
+# Format with leading zero if needed
+OPENROUTER_IMG_COST=$(printf "%.3f" "$OPENROUTER_IMG_COST")
+
+GEMINI_TEXT_COST="0.010"
 if [ "$IMAGES_VIA_GEMINI" -gt 0 ]; then
   GEMINI_IMG_NOTE="(included in Google AI plan)"
 else
@@ -493,8 +587,8 @@ echo "════════════════════════�
 echo "  📊 Build Stats"
 echo "═══════════════════════════════════════════════════"
 echo ""
-echo "  ⏱️  Total time:    ${MINUTES}m ${SECONDS}s"
-echo "  🌐 Language:      $LANG_NAME ($SITE_LANG)"
+echo "  ⏱️  Total time:    ${MINUTES:-0}m ${SECONDS:-0}s"
+echo "  🌐 Language:      ${LANG_NAME:-"Italian"} (${SITE_LANG:-"it"})"
 echo "  🏗️  Mode:          $MODE  ($IMG_MODEL)"
 echo ""
 echo "  🖼️  Images:"
@@ -514,10 +608,11 @@ fi
 if [ "$IMAGES_VIA_GEMINI" -gt 0 ]; then
   echo "     Gemini img:     included in plan ($IMAGES_VIA_GEMINI images)"
 fi
-echo "     Gemini text:    $GEMINI_TEXT_COST (HTML + CSS generation)"
+echo "     Gemini text:    \$${GEMINI_TEXT_COST} (HTML + CSS generation)"
 echo "     ─────────────"
-TOTAL_COST=$(echo "${OPENROUTER_IMG_COST:-0} + 0.01" | bc 2>/dev/null || echo "~0.01")
-echo "     Total:          ~\$${TOTAL_COST}"
+TOTAL_COST=$(echo "$OPENROUTER_IMG_COST + $GEMINI_TEXT_COST" | bc 2>/dev/null || echo "0.010")
+TOTAL_COST=$(printf "%.3f" "$TOTAL_COST")
+echo "     Total:          \$${TOTAL_COST}"
 echo ""
 echo "═══════════════════════════════════════════════════"
 echo ""
@@ -545,6 +640,13 @@ if [ -n "$REMOTE_SITE_URL" ]; then
   echo "  🌐 Open: $SITE_PUBLIC_URL"
   echo "  📂 Local: file://$SCRIPT_DIR/$FOLDER_NAME/index.html"
 else
+  SITE_PUBLIC_URL="N/A (Local build)"
   echo "  🌐 Open: open $FOLDER_NAME/index.html"
 fi
 echo ""
+
+# The final call on success
+send_build_summary "COMPLETE"
+echo ""
+# Clear trap on success
+trap - EXIT
