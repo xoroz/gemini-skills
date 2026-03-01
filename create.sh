@@ -427,7 +427,46 @@ CSS_SIZE=$(wc -c < "$FOLDER_NAME/style.css" 2>/dev/null || echo 0)
 CSS_SIZE_STR=$(numfmt --to=iec "$CSS_SIZE" 2>/dev/null || echo "${CSS_SIZE}B")
 echo "✅ style.css created! ($CSS_SIZE_STR)"
 
-# 8. CALCULATE STATS
+# 8. GENERATE FLYER
+MAKE_FLYER_SCRIPT="$SCRIPT_DIR/scripts/make_flyer.py"
+FLYER_TEMPLATE="$SCRIPT_DIR/assets/template-flyer.png"
+FLYER_NAME="flyer-${SITE_SLUG}.png"
+FLYER_ASSETS_DIR="$SCRIPT_DIR/assets/flyers"
+FLYER_ASSETS_OUT="$FLYER_ASSETS_DIR/$FLYER_NAME"
+FLYER_SITE_OUT="$SCRIPT_DIR/$FOLDER_NAME/assets/$FLYER_NAME"
+
+# Build the preview URL for the QR code
+if [ -n "$REMOTE_SITE_URL" ]; then
+  FLYER_QR_URL="$REMOTE_SITE_URL/$SITE_SLUG"
+else
+  FLYER_QR_URL="https://${SITE_SLUG}.texngo.it"
+fi
+
+echo "📄 Generating flyer..."
+echo "   QR URL : $FLYER_QR_URL"
+
+mkdir -p "$FLYER_ASSETS_DIR"
+
+if [ -f "$MAKE_FLYER_SCRIPT" ] && [ -f "$FLYER_TEMPLATE" ]; then
+  if uv run "$MAKE_FLYER_SCRIPT" \
+      --name     "$BUSINESS_NAME" \
+      --url      "$FLYER_QR_URL" \
+      --template "$FLYER_TEMPLATE" \
+      --output   "$FLYER_ASSETS_OUT" 2>&1 | sed 's/^/   /'; then
+    # Copy into the site's assets folder too
+    cp "$FLYER_ASSETS_OUT" "$FLYER_SITE_OUT"
+    echo "   📋 Also saved → $FOLDER_NAME/assets/$FLYER_NAME"
+    echo "✅ Flyer ready!"
+  else
+    echo "⚠️  Flyer generation failed — site is still complete."
+  fi
+else
+  [ ! -f "$MAKE_FLYER_SCRIPT" ] && echo "⚠️  Skipping flyer: make_flyer.py not found"
+  [ ! -f "$FLYER_TEMPLATE" ]    && echo "⚠️  Skipping flyer: template-flyer.png not found"
+fi
+echo ""
+
+# 9. CALCULATE STATS
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 MINUTES=$((ELAPSED / 60))
@@ -489,10 +528,13 @@ echo "  │   ├── gallery-1.png"
 echo "  │   ├── gallery-2.png"
 echo "  │   ├── hero.png"
 echo "  │   ├── process.png"
-echo "  │   └── workshop.png"
+echo "  │   ├── workshop.png"
+echo "  │   └── $FLYER_NAME"
 echo "  ├── index.html"
 echo "  ├── style.css"
 echo "  └── build.log"
+echo ""
+echo "  🖨️  Flyer (global): assets/flyers/$FLYER_NAME"
 echo ""
 echo "  📋 Full log: $LOG_FILE"
 echo ""
