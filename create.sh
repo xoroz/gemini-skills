@@ -429,6 +429,10 @@ DESIGN REQUIREMENTS:
 JAVASCRIPT RULE:
 - NEVER use 'window' as a variable name in forEach, map, or any callback. Use 'el' or 'element'. Example: elements.forEach(el => { ... })
 
+CDN LINKS RULE:
+- When linking external resources (Font Awesome, Google Fonts, etc.), do NOT add integrity= or crossorigin= attributes. Just use a simple <link> tag with rel and href.
+- Example: <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
 OUTPUT FORMAT - CRITICAL:
 Your VERY FIRST character of output MUST be '<' (the start of <!DOCTYPE html>).
 Do NOT output any explanation, commentary, thinking, or preamble before the code.
@@ -526,6 +530,19 @@ elif "<html" in content:
 # Remove trailing markdown ticks if any leaked out
 content = content.replace("```", "")
 print(content.strip())
+' < "$FOLDER_NAME/index.html" > "$FOLDER_NAME/index.html.tmp" && mv "$FOLDER_NAME/index.html.tmp" "$FOLDER_NAME/index.html"
+
+# Sanitize: remove integrity/crossorigin attrs (AI hallucinates bogus SHA hashes)
+# and catch any runaway repeated content (e.g. "5F5F5F5F5F..." thousands of times)
+python3 -c '
+import re, sys
+html = sys.stdin.read()
+# Remove integrity="..." and crossorigin="..." attributes
+html = re.sub(r"\s+integrity=\"[^"]*\"", "", html)
+html = re.sub(r"\s+crossorigin=\"[^"]*\"", "", html)
+# Detect and truncate any single character or short pattern repeated 100+ times
+html = re.sub(r"(.{1,4})\1{100,}", "", html)
+print(html)
 ' < "$FOLDER_NAME/index.html" > "$FOLDER_NAME/index.html.tmp" && mv "$FOLDER_NAME/index.html.tmp" "$FOLDER_NAME/index.html"
 
 HTML_SIZE=$(wc -c < "$FOLDER_NAME/index.html" 2>/dev/null || echo 0)
