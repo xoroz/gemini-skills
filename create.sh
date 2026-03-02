@@ -142,7 +142,7 @@ if [ "$MODE" = "DEV" ]; then
   IMG_COST_EACH="${AI_COST_IMG:-0.014}"
 elif [ "$MODE" = "PROD" ]; then
   IMG_MODEL="${AI_MODEL_IMG:-google/gemini-3.1-flash-image-preview}"
-  IMG_COST_EACH="${AI_COST_IMG:-0.038}"
+  IMG_COST_EACH="${AI_COST_IMG:-0.068}"
 else
   IMG_MODEL="mockup (local .skel)"
   IMG_COST_EACH=0
@@ -301,12 +301,20 @@ for IMG_NAME in "${!IMAGES[@]}"; do
   RETRY=0
   SUCCESS=false
 
+  # Image resolution: PROD can use 0.5K (only gemini-3.1 supports it), DEV stays at 1K
+  if [ "$MODE" = "PROD" ]; then
+    IMG_SIZE_PARAM="${AI_IMG_SIZE:-0.5K}"
+  else
+    IMG_SIZE_PARAM="1K"
+  fi
+
   while [ $RETRY -le $MAX_RETRIES ]; do
     OUTPUT=$(uv run "$IMAGE_SCRIPT" \
       --prompt "$IMG_PROMPT" \
       --output "$IMG_PATH" \
       --aspect landscape \
       --quality draft \
+      --size "$IMG_SIZE_PARAM" \
       --model "$IMG_MODEL" 2>&1)
     EXIT_CODE=$?
 

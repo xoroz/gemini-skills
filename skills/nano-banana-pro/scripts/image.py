@@ -8,20 +8,20 @@
 # ]
 # ///
 """
-Generate images using Google's Gemini 2.5 Flash (Nano Banana Pro).
+Generate images using AI models via OpenRouter or Google GenAI (Nano Banana Pro).
 
 Supports two providers:
   1. OpenRouter (OPENROUTER_API_KEY) - default/primary  (more reliable)
   2. Google GenAI (GEMINI_API_KEY)   - fallback
 
 OpenRouter model options:
-  google/gemini-2.5-flash-image   — best quality  (~$0.030/img)  [PROD default]
-  sourceful/riverflow-v2-fast     — cheap & fast   (~$0.003/img)  [DEV default]
+  google/gemini-3.1-flash-image-preview — best quality  (~$0.068/img)  [PROD default]
+  black-forest-labs/flux.2-klein-4b     — cheap & fast   (~$0.014/img)  [DEV default]
 
 Usage:
     uv run image.py --prompt "A colorful abstract pattern" --output "./hero.png"
-    uv run image.py --prompt "Quick draft" --output "./draft.png" --quality draft
-    uv run image.py --prompt "Cheap dev run" --output "./img.png" --model sourceful/riverflow-v2-fast
+    uv run image.py --prompt "Quick draft" --output "./draft.png" --quality draft --size 0.5K
+    uv run image.py --prompt "Cheap dev run" --output "./img.png" --model black-forest-labs/flux.2-klein-4b
     uv run image.py --prompt "Force gemini" --output "./img.png" --provider gemini
 """
 
@@ -39,10 +39,21 @@ from PIL import Image
 # Pricing table (USD per image) — update when OpenRouter changes rates
 # ---------------------------------------------------------------------------
 MODEL_PRICING = {
-    "google/gemini-2.5-flash-image": 0.038,   # PROD quality
-    "black-forest-labs/flux.2-klein-4b":   0.014,   # DEV / cheap
+    "google/gemini-3.1-flash-image-preview": 0.068,  # PROD quality
+    "google/gemini-2.5-flash-image": 0.038,           # Legacy PROD
+    "black-forest-labs/flux.2-klein-4b":   0.014,      # DEV / cheap
 }
-DEFAULT_OPENROUTER_MODEL = "google/gemini-2.5-flash-image"
+DEFAULT_OPENROUTER_MODEL = "google/gemini-3.1-flash-image-preview"
+
+# OpenRouter image_config aspect ratio mapping
+ASPECT_RATIO_MAP = {
+    "square": "1:1",
+    "landscape": "16:9",
+    "portrait": "9:16",
+    "wide": "21:9",
+    "3:2": "3:2",
+    "4:3": "4:3",
+}
 
 def get_aspect_instruction(aspect: str) -> str:
     """Return aspect ratio instruction for the prompt."""
@@ -115,6 +126,7 @@ def generate_with_gemini(
 def generate_with_openrouter(
     prompt: str, output_path: str, aspect: str = "square",
     quality: str = "high", model: str = DEFAULT_OPENROUTER_MODEL,
+    size: str = "1K",
 ) -> bool:
     """Generate image using OpenRouter API. Returns True on success."""
     api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -130,6 +142,22 @@ def generate_with_openrouter(
         quality_instruction = get_quality_instruction(quality)
         full_prompt = f"{aspect_instruction} {quality_instruction} {prompt}".strip()
 
+        # Build image_config for OpenRouter
+        image_config = {}
+        or_aspect = ASPECT_RATIO_MAP.get(aspect)
+        if or_aspect:
+            image_config["aspect_ratio"] = or_aspect
+        if size and size != "1K":
+            image_config["image_size"] = size
+
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": full_prompt}],
+            "modalities": ["image", "text"],
+        }
+        if image_config:
+            payload["image_config"] = image_config
+
         response = http_requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -137,10 +165,7 @@ def generate_with_openrouter(
                 "Content-Type": "application/json",
                 "X-Title": "Nano Banana Pro",
             },
-            data=json.dumps({
-                "model": model,
-                "messages": [{"role": "user", "content": full_prompt}],
-            }),
+            data=json.dumps(payload),
             timeout=60,   # 60 s — if it hasn't responded by then, something is wrong
         )
 
@@ -213,6 +238,7 @@ def generate_image(
     prompt: str, output_path: str, aspect: str = "square",
     quality: str = "high", reference: str | None = None,
     provider: str = "auto", model: str = DEFAULT_OPENROUTER_MODEL,
+    size: str = "1K",
 ) -> None:
     """Generate image — OpenRouter first by default (more reliable than Gemini API)."""
     output_dir = os.path.dirname(output_path)
@@ -227,7 +253,7 @@ def generate_image(
 
     for prov in provider_list:
         if prov == "openrouter":
-            success = generate_with_openrouter(prompt, output_path, aspect, quality, model)
+            success = generate_with_openrouter(prompt, output_path, aspect, quality, model, size)
         else:
             success = generate_with_gemini(prompt, output_path, aspect, quality, reference)
         if success:
@@ -239,13 +265,13 @@ def generate_image(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate images using Gemini 2.5 Flash (Nano Banana Pro)"
+        description="Generate images using AI models (Nano Banana Pro)"
     )
     parser.add_argument("--prompt",    required=True, help="Description of the image to generate")
     parser.add_argument("--output",    required=True, help="Output file path (PNG format)")
     parser.add_argument(
         "--aspect",
-        choices=["square", "landscape", "portrait"],
+        choices=["square", "landscape", "portrait", "wide", "3:2", "4:3"],
         default="square",
         help="Aspect ratio (default: square)",
     )
@@ -254,6 +280,12 @@ def main():
         choices=["high", "draft"],
         default="high",
         help="Image quality: 'high' for production, 'draft' for mockups (default: high)",
+    )
+    parser.add_argument(
+        "--size",
+        choices=["0.5K", "1K", "2K", "4K"],
+        default="1K",
+        help="Image resolution: 0.5K (cheap/fast), 1K (default), 2K, 4K (default: 1K)",
     )
     parser.add_argument(
         "--reference",
@@ -270,8 +302,8 @@ def main():
         default=DEFAULT_OPENROUTER_MODEL,
         help=(
             f"OpenRouter model to use (default: {DEFAULT_OPENROUTER_MODEL}). "
-            "Examples: sourceful/riverflow-v2-fast (cheap/dev), "
-            "google/gemini-2.5-flash-image (prod)"
+            "Examples: black-forest-labs/flux.2-klein-4b (cheap/dev), "
+            "google/gemini-3.1-flash-image-preview (prod)"
         ),
     )
 
@@ -279,6 +311,7 @@ def main():
     generate_image(
         args.prompt, args.output, args.aspect,
         args.quality, args.reference, args.provider, args.model,
+        args.size,
     )
 
 
