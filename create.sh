@@ -148,10 +148,12 @@ else
   IMG_COST_EACH=0
 fi
 
-if [ "$MODE" = "DEV" ] || [ "$MODE" = "MOCKUP" ]; then
+if [ "$MODE" = "MOCKUP" ]; then
   TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash-lite}"
-else
+elif [ "$MODE" = "DEV" ]; then
   TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash}"
+else
+  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-3.1-pro-preview}"
 fi
 # =============================================================================
 
