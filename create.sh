@@ -132,25 +132,26 @@ fi
 REMOTE_SITE_URL="${REMOTE_SITE_URL%/}"  # strip trailing slash if any
 
 # =============================================================================
-# IMAGE MODEL & PRICING — edit these when rates change
+# IMAGE MODEL & PRICING
+# Override via .env:  AI_MODEL_IMG, AI_MODEL_TEXT, AI_COST_IMG
 # =============================================================================
 MODE="${MODE:-DEV}"  # DEV = cheap/fast, PROD = quality, MOCKUP = skip billing
 
 if [ "$MODE" = "DEV" ]; then
-  IMG_MODEL="black-forest-labs/flux.2-klein-4b"
-  IMG_COST_EACH=0.014
+  IMG_MODEL="${AI_MODEL_IMG:-black-forest-labs/flux.2-klein-4b}"
+  IMG_COST_EACH="${AI_COST_IMG:-0.014}"
 elif [ "$MODE" = "PROD" ]; then
-  IMG_MODEL="google/gemini-2.5-flash-image"
-  IMG_COST_EACH=0.038   # ~$0.030/img via OpenRouter
+  IMG_MODEL="${AI_MODEL_IMG:-google/gemini-3.1-flash-image-preview}"
+  IMG_COST_EACH="${AI_COST_IMG:-0.038}"
 else
   IMG_MODEL="mockup (local .skel)"
   IMG_COST_EACH=0
 fi
 
 if [ "$MODE" = "DEV" ] || [ "$MODE" = "MOCKUP" ]; then
-  TEXT_MODEL="gemini-2.5-flash-lite"
+  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash-lite}"
 else
-  TEXT_MODEL="gemini-2.5-flash"
+  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash}"
 fi
 # =============================================================================
 
