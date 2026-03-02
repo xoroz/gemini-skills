@@ -432,6 +432,30 @@ async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
     if REMOTE_SITE_URL:
         response["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
 
+    # Pre-allocate short ID so n8n gets it immediately
+    id_info = _lookup_site_id(site_slug)
+    if id_info:
+        response["site_id"] = id_info["id"]
+        response["url_id"] = id_info.get("url_id", "")
+    else:
+        # Allocate now via id_manager (create.sh will reuse the same ID)
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["uv", "run", "scripts/id_manager.py", "allocate",
+                 "--business", data.business_name,
+                 "--remote-url", REMOTE_SITE_URL or ""],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().splitlines():
+                    if line.startswith("SITE_ID="):
+                        response["site_id"] = line.split("=", 1)[1]
+                    elif line.startswith("URLID="):
+                        response["url_id"] = line.split("=", 1)[1]
+        except Exception as exc:
+            logger.warning(f"⚠️ [GENERATE] Could not pre-allocate ID: {exc}")
+
     return response
 
 
