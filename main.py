@@ -300,6 +300,22 @@ async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_del
         )
 
 
+def _lookup_site_id(slug: str) -> dict | None:
+    """Look up a slug in sites/site-id.json and return its entry if found."""
+    registry_path = os.path.join("sites", "site-id.json")
+    if not os.path.exists(registry_path):
+        return None
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+        for entry in registry:
+            if entry.get("slug") == slug:
+                return entry
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
 async def build_site_and_notify(data: BusinessData):
     site_slug = _site_slug(data.business_name)
     site_dir = os.path.join("sites", site_slug)
@@ -315,6 +331,13 @@ async def build_site_and_notify(data: BusinessData):
             payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
         else:
             payload["site_slug"] = site_slug
+
+        # Look up site_id from registry for cache-hit payloads
+        id_info = _lookup_site_id(site_slug)
+        if id_info:
+            payload["site_id"] = id_info["id"]
+            payload["url_id"] = id_info.get("url_id", "")
+
         # Delay before firing: n8n's Wait node needs ~1-2s to register its listener
         # after the /generate-site response is received. Cache hits are instant,
         # so without this delay the webhook fires before n8n is ready.
@@ -364,6 +387,15 @@ async def build_site_and_notify(data: BusinessData):
                 payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
             else:
                 payload["site_slug"] = site_slug
+
+            # Parse site_id/url_id from build output
+            build_output = stdout.decode(errors="replace")
+            m_id = re.search(r"SITE_ID=(\S+)", build_output)
+            m_urlid = re.search(r"URLID=(\S+)", build_output)
+            if m_id:
+                payload["site_id"] = m_id.group(1)
+            if m_urlid:
+                payload["url_id"] = m_urlid.group(1)
         else:
             err_text = stderr.decode(errors="replace").strip()
             logger.error(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")
@@ -437,9 +469,16 @@ def _parse_build_stats(log_text: str) -> dict:
     m = re.search(r"Total size:\s+(\S+)", log_text)
     if m: stats["total_size"] = m.group(1).strip()
 
-    # Final public URL written by create.sh: "🌐 Open: http://..."
-    m = re.search(r"Open:\s+(https?://\S+)", log_text)
+    # Final public URL written by create.sh: "🌐 URL=http://..."
+    m = re.search(r"URL=(https?://\S+)", log_text)
     if m: stats["site_url"] = m.group(1).strip()
+
+    # Short ID system
+    m = re.search(r"URLID=(\S+)", log_text)
+    if m: stats["url_id"] = m.group(1).strip()
+
+    m = re.search(r"SITE_ID=(\S+)", log_text)
+    if m: stats["site_id"] = m.group(1).strip()
 
     return stats
 
@@ -467,7 +506,7 @@ async def get_build_log(slug: str, lines: int = 0):
 
     # Detect state from the tail of the log
     tail = full_log[-2000:]
-    if "🌐 Open:" in tail:
+    if "🌐 URL=" in tail:
         build_status = "complete"
     elif "❌ Failed" in tail or "exit 1" in tail:
         build_status = "failed"
@@ -517,7 +556,7 @@ async def get_job_status(job_id: str):
         full_log = f.read()
 
     tail = full_log[-2000:]
-    if "🌐 Open:" in tail:
+    if "🌐 URL=" in tail:
         status = "complete"
     elif "❌ Failed" in tail or "exit 1" in tail:
         status = "failed"

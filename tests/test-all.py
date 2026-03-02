@@ -533,8 +533,8 @@ def _parse_build_stats(log_text: str) -> dict:
     m = _re.search(r"Total size:\s+(\S+)", log_text)
     if m: stats["total_size"] = m.group(1).strip()
 
-    # 🌐 Open: http://...  line written by create.sh
-    m = _re.search(r"Open:\s+(https?://\S+)", log_text)
+    # 🌐 URL=http://...  line written by create.sh
+    m = _re.search(r"URL=(https?://\S+)", log_text)
     if m: stats["site_url"] = m.group(1).strip()
 
     return stats
@@ -579,7 +579,7 @@ def step_build_log(site_slug: str):
 
     # Detect build state from tail of log
     tail = log_text[-2000:]
-    if "🌐 Open:" in tail:
+    if "🌐 URL=" in tail:
         build_status, sc = "COMPLETE", GREEN
     elif "❌ Failed" in tail or "exit 1" in tail:
         build_status, sc = "FAILED",   RED

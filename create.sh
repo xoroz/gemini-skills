@@ -29,6 +29,7 @@ fi
 
 IMAGE_SCRIPT="$SCRIPT_DIR/skills/nano-banana-pro/scripts/image.py"
 MAIL_SCRIPT="$SCRIPT_DIR/assets/bin/send_mail.py"
+ID_MANAGER="$SCRIPT_DIR/scripts/id_manager.py"
 
 # =============================================================================
 # NOTIFICATION HELPER (needs to be defined before trap)
@@ -578,7 +579,60 @@ CSS_SIZE=$(wc -c < "$FOLDER_NAME/style.css" 2>/dev/null || echo 0)
 CSS_SIZE_STR=$(numfmt --to=iec "$CSS_SIZE" 2>/dev/null || echo "${CSS_SIZE}B")
 echo "✅ style.css created! ($CSS_SIZE_STR)"
 
-# 8. GENERATE FLYER
+# 8. ALLOCATE SHORT ID
+echo "🆔 Allocating short ID..."
+SITE_ID="${SITE_ID:-}"  # Allow manual override via env var
+
+if [ -f "$ID_MANAGER" ]; then
+  if [ -n "$SITE_ID" ]; then
+    # Manual: use the ID passed via env var
+    ID_OUTPUT=$(uv run "$ID_MANAGER" assign \
+        --id "$SITE_ID" \
+        --business "$BUSINESS_NAME" \
+        --remote-url "${REMOTE_SITE_URL:-}" 2>&1)
+  else
+    # Auto: allocate next available
+    ID_OUTPUT=$(uv run "$ID_MANAGER" allocate \
+        --business "$BUSINESS_NAME" \
+        --remote-url "${REMOTE_SITE_URL:-}" 2>&1)
+  fi
+
+  # Parse output (key=value lines)
+  SITE_ID=$(echo "$ID_OUTPUT" | grep '^SITE_ID=' | cut -d= -f2)
+  SITE_URLID=$(echo "$ID_OUTPUT" | grep '^URLID=' | cut -d= -f2)
+
+  if [ -n "$SITE_ID" ]; then
+    echo "   ✅ Site ID: $SITE_ID"
+    echo "   🔗 URLID:  $SITE_URLID"
+
+    # Create redirect HTML in sites/ root
+    REDIRECT_FILE="sites/${SITE_ID}.html"
+    cat > "$REDIRECT_FILE" <<REDIRECT_EOF
+<!DOCTYPE html>
+<html lang="$SITE_LANG">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=${SITE_SLUG}/index.html">
+<title>Redirect → $BUSINESS_NAME</title>
+</head>
+<body>
+<p>Redirecting to <a href="${SITE_SLUG}/index.html">$BUSINESS_NAME</a>...</p>
+</body>
+</html>
+REDIRECT_EOF
+    echo "   📄 Redirect: $REDIRECT_FILE → $SITE_SLUG/index.html"
+  else
+    echo "   ⚠️  ID allocation returned no ID. Output: $ID_OUTPUT"
+    SITE_ID=""
+    SITE_URLID=""
+  fi
+else
+  echo "   ⚠️  Skipping: id_manager.py not found"
+  SITE_URLID=""
+fi
+echo ""
+
+# 9. GENERATE FLYER
 MAKE_FLYER_SCRIPT="$SCRIPT_DIR/scripts/make_flyer.py"
 FLYER_TEMPLATE="$SCRIPT_DIR/assets/template-flyer.png"
 FLYER_NAME="flyer-${SITE_SLUG}.png"
@@ -586,8 +640,10 @@ FLYER_ASSETS_DIR="$SCRIPT_DIR/assets/flyers"
 FLYER_ASSETS_OUT="$FLYER_ASSETS_DIR/$FLYER_NAME"
 FLYER_SITE_OUT="$SCRIPT_DIR/$FOLDER_NAME/assets/$FLYER_NAME"
 
-# Build the preview URL for the QR code
-if [ -n "$REMOTE_SITE_URL" ]; then
+# Build the QR URL — use URLID (short redirect) if available, fall back to slug
+if [ -n "$SITE_URLID" ]; then
+  FLYER_QR_URL="$SITE_URLID"
+elif [ -n "$REMOTE_SITE_URL" ]; then
   FLYER_QR_URL="$REMOTE_SITE_URL/$SITE_SLUG"
 else
   FLYER_QR_URL="https://${SITE_SLUG}.texngo.it"
@@ -598,12 +654,18 @@ echo "   QR URL : $FLYER_QR_URL"
 
 mkdir -p "$FLYER_ASSETS_DIR"
 
+FLYER_ID_ARGS=()
+if [ -n "$SITE_ID" ]; then
+  FLYER_ID_ARGS=("--site-id" "$SITE_ID")
+fi
+
 if [ -f "$MAKE_FLYER_SCRIPT" ] && [ -f "$FLYER_TEMPLATE" ]; then
   if uv run "$MAKE_FLYER_SCRIPT" \
       --name     "$BUSINESS_NAME" \
       --url      "$FLYER_QR_URL" \
       --template "$FLYER_TEMPLATE" \
-      --output   "$FLYER_ASSETS_OUT" 2>&1 | sed 's/^/   /'; then
+      --output   "$FLYER_ASSETS_OUT" \
+      "${FLYER_ID_ARGS[@]}" 2>&1 | sed 's/^/   /'; then
     # Copy into the site's assets folder too
     cp "$FLYER_ASSETS_OUT" "$FLYER_SITE_OUT"
     echo "   📋 Also saved → $FOLDER_NAME/assets/$FLYER_NAME"
@@ -694,7 +756,11 @@ echo ""
 # Final URL output  — the 🌐 Open: line is used by test-all.py as a build-complete marker
 if [ -n "$REMOTE_SITE_URL" ]; then
   SITE_PUBLIC_URL="$REMOTE_SITE_URL/$SITE_SLUG/index.html"
-  echo "  🌐 Open: $SITE_PUBLIC_URL"
+  echo "  🌐 URL=$SITE_PUBLIC_URL"
+  if [ -n "$SITE_URLID" ]; then
+    echo "  🆔 URLID=$SITE_URLID"
+    echo "  🆔 SITE_ID=$SITE_ID"
+  fi
   echo "  📂 Local: file://$SCRIPT_DIR/$FOLDER_NAME/index.html"
   
   echo -n "  📡 Testing remote live URL... "
@@ -707,7 +773,7 @@ if [ -n "$REMOTE_SITE_URL" ]; then
   fi
 else
   SITE_PUBLIC_URL="N/A (Local build)"
-  echo "  🌐 Open: open $FOLDER_NAME/index.html"
+  echo "  🌐 URL=open $FOLDER_NAME/index.html"
 fi
 echo ""
 

@@ -32,7 +32,7 @@ import sys
 
 import qrcode
 from qrcode.image.pil import PilImage
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 # ---------------------------------------------------------------------------
 # Default QR placeholder coordinates (measured against 1080×1350 template).
@@ -83,6 +83,7 @@ def stamp_flyer(
     qr_box_w: int = DEFAULT_QR_BOX_W,
     qr_box_h: int = DEFAULT_QR_BOX_H,
     qr_inset:  int = DEFAULT_QR_INSET,
+    site_id: str | None = None,
 ) -> None:
     """Load template, generate QR, paste, save."""
     # ── Load template ──────────────────────────────────────────────────────
@@ -101,6 +102,28 @@ def stamp_flyer(
     paste_x = qr_box_x + qr_inset + (qr_box_w - qr_inset * 2 - qr_size) // 2
     paste_y = qr_box_y + qr_inset + (qr_box_h - qr_inset * 2 - qr_size) // 2
     canvas.paste(qr_img, (paste_x, paste_y))
+
+    # ── Stamp Site ID (soft, bottom-left) ─────────────────────────────────
+    if site_id:
+        draw = ImageDraw.Draw(canvas)
+        # Try to load a clean font; fall back to default
+        font_size = 18
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        except (OSError, IOError):
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
+            except (OSError, IOError):
+                font = ImageFont.load_default()
+
+        id_text = f"ID: {site_id}"
+        # Position: bottom-left corner with small margin
+        text_x = 14
+        text_y = h - 30
+        # Soft gray color — visible but not distracting
+        id_color = (180, 170, 160)
+        draw.text((text_x, text_y), id_text, fill=id_color, font=font)
+        print(f"   ID stamp : '{id_text}' at ({text_x}, {text_y})")
 
     # ── Save ───────────────────────────────────────────────────────────────
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -130,6 +153,7 @@ def main() -> None:
     ap.add_argument("--qr-box-w", type=int, default=DEFAULT_QR_BOX_W)
     ap.add_argument("--qr-box-h", type=int, default=DEFAULT_QR_BOX_H)
     ap.add_argument("--qr-inset", type=int, default=DEFAULT_QR_INSET)
+    ap.add_argument("--site-id",  default=None, help="Short ID (e.g. 00A) to stamp softly on flyer")
 
     args = ap.parse_args()
 
@@ -145,6 +169,7 @@ def main() -> None:
         qr_box_w      = args.qr_box_w,
         qr_box_h      = args.qr_box_h,
         qr_inset      = args.qr_inset,
+        site_id       = args.site_id,
     )
 
 
