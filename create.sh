@@ -260,11 +260,15 @@ if [ -d "$FOLDER_NAME" ]; then
 fi
 
 LOG_FILE="$FOLDER_NAME/build.log"
+BACKEND_LOG="$SCRIPT_DIR/logs/backend.log"
 
 mkdir -p "$FOLDER_NAME/assets"
 
-# Start logging
-exec > >(tee -a "$LOG_FILE") 2>&1
+# Start logging — output goes to:
+#   1. stdout (for main.py to capture via PIPE)
+#   2. $LOG_FILE (per-site build.log)
+#   3. $BACKEND_LOG (global log — tail -f logs/backend.log to watch everything)
+exec > >(tee -a "$LOG_FILE" -a "$BACKEND_LOG") 2>&1
 
 echo "═══════════════════════════════════════════════════"
 echo "  🏗️  Landing Page Builder"
