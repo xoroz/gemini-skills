@@ -369,11 +369,22 @@ for IMG_NAME in "${!IMAGES[@]}"; do
     echo "[IMG FAIL] ${IMG_NAME} attempt=$RETRY model=$IMG_MODEL exit=$EXIT_CODE" >> "$LOG_FILE"
     echo "$OUTPUT" >> "$LOG_FILE"
 
-    # Check if it's a rate limit error (429)
-    if echo "$OUTPUT" | grep -qi "429\|RESOURCE_EXHAUSTED\|rate"; then
+    # ── Classify the error ──
+    if echo "$OUTPUT" | grep -qi "daily.limit\|403.*limit\|PerDay\|daily_limit"; then
+      # DAILY LIMIT — no point retrying this or any remaining images
+      echo "     🛑 DAILY QUOTA EXHAUSTED — aborting all remaining images."
+      echo "        OpenRouter: check limit at https://openrouter.ai/settings/keys"
+      echo "        Gemini: free tier daily cap hit, resets at midnight PT."
+      IMAGES_FAILED=$((IMAGES_FAILED + 1))
+      # Mark all remaining images as failed too
+      REMAINING=$((IMG_TOTAL - IMG_COUNT))
+      IMAGES_FAILED=$((IMAGES_FAILED + REMAINING))
+      break 2  # break out of BOTH the retry loop and the image loop
+    elif echo "$OUTPUT" | grep -qi "429\|RESOURCE_EXHAUSTED\|rate"; then
+      # PER-MINUTE rate limit — worth retrying after backoff
       if [ $RETRY -le $MAX_RETRIES ]; then
         WAIT=$((30 * RETRY))  # 30s, 60s backoff
-        echo "     ⏳ Rate limited. Waiting ${WAIT}s before retry $RETRY/$MAX_RETRIES..."
+        echo "     ⏳ Rate limited (per-minute). Waiting ${WAIT}s before retry $RETRY/$MAX_RETRIES..."
         sleep $WAIT
       else
         echo "     ❌ Failed after $MAX_RETRIES retries (rate limited)."
