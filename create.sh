@@ -346,14 +346,12 @@ for IMG_NAME in "${!IMAGES[@]}"; do
       IMG_SIZE=$(stat -c%s "$IMG_PATH" 2>/dev/null || stat -f%z "$IMG_PATH" 2>/dev/null || echo 0)
       if [ "$IMG_SIZE" -lt 5000 ]; then
         echo "     ❌ Error: Image ${IMG_NAME}.png is invalid (size too small: $IMG_SIZE bytes)."
-        # Break out of retry loop but leave SUCCESS=false
         break
       fi
 
       echo "$OUTPUT" | sed 's/^/     /'
       SUCCESS=true
       IMAGES_GENERATED=$((IMAGES_GENERATED + 1))
-      # Track which provider was used
       if echo "$OUTPUT" | grep -q "\[openrouter\]"; then
         IMAGES_VIA_OPENROUTER=$((IMAGES_VIA_OPENROUTER + 1))
       else
@@ -362,9 +360,17 @@ for IMG_NAME in "${!IMAGES[@]}"; do
       break
     fi
 
+    # ── Failed — always log the full error for debugging ──
+    RETRY=$((RETRY + 1))
+    echo "     ❌ Attempt $RETRY failed (exit code $EXIT_CODE)."
+    echo "     📋 Model: $IMG_MODEL  |  Size: $IMG_SIZE_PARAM"
+    echo "     📋 Prompt: ${IMG_PROMPT:0:120}..."
+    echo "$OUTPUT" | sed 's/^/     📋 /'
+    echo "[IMG FAIL] ${IMG_NAME} attempt=$RETRY model=$IMG_MODEL exit=$EXIT_CODE" >> "$LOG_FILE"
+    echo "$OUTPUT" >> "$LOG_FILE"
+
     # Check if it's a rate limit error (429)
-    if echo "$OUTPUT" | grep -q "429\|RESOURCE_EXHAUSTED\|rate"; then
-      RETRY=$((RETRY + 1))
+    if echo "$OUTPUT" | grep -qi "429\|RESOURCE_EXHAUSTED\|rate"; then
       if [ $RETRY -le $MAX_RETRIES ]; then
         WAIT=$((30 * RETRY))  # 30s, 60s backoff
         echo "     ⏳ Rate limited. Waiting ${WAIT}s before retry $RETRY/$MAX_RETRIES..."
@@ -373,9 +379,8 @@ for IMG_NAME in "${!IMAGES[@]}"; do
         echo "     ❌ Failed after $MAX_RETRIES retries (rate limited)."
       fi
     else
-      # Non-rate-limit error, don't retry
-      echo "$OUTPUT" | sed 's/^/     /'
-      echo "  ⚠️  Warning: Failed to generate ${IMG_NAME}.png, continuing..."
+      # Non-rate-limit error — don't retry (bad prompt, auth error, etc.)
+      echo "  ⚠️  Warning: Non-retryable error for ${IMG_NAME}.png, skipping."
       break
     fi
   done
