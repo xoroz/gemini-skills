@@ -68,14 +68,23 @@ SCRIPT_DIR   = Path(__file__).resolve().parent
 PROJECT_DIR  = SCRIPT_DIR.parent
 
 # ── Registry path ─────────────────────────────────────────────────────────────
-# Override via SITE_ID_REGISTRY env var to isolate DEV from PROD:
-#   SITE_ID_REGISTRY=sites/site-id-dev.json MODE=DEV ./create.sh ...
+# Priority:
+#   1. SITE_ID_REGISTRY env var  → explicit override, always wins
+#   2. MODE=DEV or MODE=MOCKUP   → sites/site-id-dev.json  (throwaway test IDs)
+#   3. MODE=PROD/SUPER or unset  → sites/site-id.json       (production IDs)
+#
+# Running `MODE=DEV ./create.sh ...` automatically isolates test IDs.
+# No extra config needed for the common case.
+
 _registry_env = os.environ.get("SITE_ID_REGISTRY", "")
-REGISTRY_FILE = (
-    PROJECT_DIR / _registry_env
-    if _registry_env
-    else PROJECT_DIR / "sites" / "site-id.json"
-)
+_mode         = os.environ.get("MODE", "PROD").upper()
+
+if _registry_env:
+    REGISTRY_FILE = PROJECT_DIR / _registry_env
+elif _mode in ("DEV", "MOCKUP"):
+    REGISTRY_FILE = PROJECT_DIR / "sites" / "site-id-dev.json"
+else:
+    REGISTRY_FILE = PROJECT_DIR / "sites" / "site-id.json"
 
 
 # ---------------------------------------------------------------------------
