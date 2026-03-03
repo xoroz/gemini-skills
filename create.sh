@@ -550,16 +550,21 @@ print(content.strip())
 
 # Sanitize: remove integrity/crossorigin attrs (AI hallucinates bogus SHA hashes)
 # and catch any runaway repeated content (e.g. "5F5F5F5F5F..." thousands of times)
-python3 -c '
+# NOTE: Using a temp .py file to avoid bash/python quoting conflicts with regex.
+SANITIZE_SCRIPT=$(mktemp /tmp/sanitize_XXXXXX.py)
+cat > "$SANITIZE_SCRIPT" << 'PYEOF'
 import re, sys
+
 html = sys.stdin.read()
 # Remove integrity="..." and crossorigin="..." attributes
-html = re.sub(r"\s+integrity=\"[^"]*\"", "", html)
-html = re.sub(r"\s+crossorigin=\"[^"]*\"", "", html)
+html = re.sub(r'\s+integrity="[^"]*"', '', html)
+html = re.sub(r'\s+crossorigin="[^"]*"', '', html)
 # Detect and truncate any single character or short pattern repeated 100+ times
-html = re.sub(r"(.{1,4})\1{100,}", "", html)
+html = re.sub(r'(.{1,4})\1{100,}', '', html)
 print(html)
-' < "$FOLDER_NAME/index.html" > "$FOLDER_NAME/index.html.tmp" && mv "$FOLDER_NAME/index.html.tmp" "$FOLDER_NAME/index.html"
+PYEOF
+python3 "$SANITIZE_SCRIPT" < "$FOLDER_NAME/index.html" > "$FOLDER_NAME/index.html.tmp" && mv "$FOLDER_NAME/index.html.tmp" "$FOLDER_NAME/index.html"
+rm -f "$SANITIZE_SCRIPT"
 
 HTML_SIZE=$(wc -c < "$FOLDER_NAME/index.html" 2>/dev/null || echo 0)
 if [ "$HTML_SIZE" -eq 0 ]; then
@@ -568,9 +573,18 @@ if [ "$HTML_SIZE" -eq 0 ]; then
 fi
 
 echo "🔍 Verifying HTML integrity..."
-if ! grep -qi "<html" "$FOLDER_NAME/index.html" || ! grep -qi "</html" "$FOLDER_NAME/index.html"; then
-  echo "❌ Error: index.html is severely malformed (missing root tags)."
-  exit 1
+
+# Check for truncated output (model hit token limit — HTML cut off mid-tag)
+if ! grep -qi "</html" "$FOLDER_NAME/index.html"; then
+  if grep -qi "<html" "$FOLDER_NAME/index.html"; then
+    echo "⚠️  HTML appears truncated (has <html> but no </html>). Model may have hit output token limit."
+    echo "   File size: $(numfmt --to=iec "$HTML_SIZE" 2>/dev/null || echo "${HTML_SIZE}B") — appending closing tags as recovery."
+    # Attempt a best-effort recovery by closing any open tags
+    echo "</div></section></main></body></html>" >> "$FOLDER_NAME/index.html"
+  else
+    echo "❌ Error: index.html is severely malformed (missing root tags)."
+    exit 1
+  fi
 fi
 
 HTML_SIZE_STR=$(numfmt --to=iec "$HTML_SIZE" 2>/dev/null || echo "${HTML_SIZE}B")
