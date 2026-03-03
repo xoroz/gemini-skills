@@ -655,14 +655,20 @@ if [ -f "$ID_MANAGER" ]; then
     # only appears when opening the short ID link (e.g. sites/42.html).
     # To remove: just share the direct slug URL instead of the ID link.
 
-    # Language-aware claim bar copy
+    # Language-aware claim bar copy + pre-filled contact URL
+    # URL params land before #contact so texngo.it JS can read them via URLSearchParams
+    # texngo.it contact form needs: document.querySelector('[name=name]').value = params.get('name') etc.
+    BNAME_ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$BUSINESS_NAME")
     if [ "$SITE_LANG" = "it" ]; then
       CLAIM_MSG="Questo sito generato con AI per <strong>$BUSINESS_NAME</strong> è riservato per <strong>48 ore</strong>. Clicca <em>Richiedi</em> per evitare la scadenza del link."
       CLAIM_BTN="🚀 Richiedi il Sito"
+      MSG_ENC="S%C3%AC%2C+voglio+il+mio+sito+fatto+da+voi%21"  # "Sì, voglio il mio sito fatto da voi!"
     else
       CLAIM_MSG="This AI-generated site for <strong>$BUSINESS_NAME</strong> is reserved for <strong>48 hours</strong>. Click <em>Claim</em> to prevent link expiration."
       CLAIM_BTN="🚀 Claim Your Site"
+      MSG_ENC="Yes%2C+I+want+my+website+done+by+you%21"
     fi
+    CLAIM_URL="https://texngo.it/?name=${BNAME_ENC}&message=${MSG_ENC}&focus=email#contact"
 
     REDIRECT_FILE="sites/${SITE_ID}.html"
     cat > "$REDIRECT_FILE" <<REDIRECT_EOF
@@ -727,7 +733,7 @@ if [ -f "$ID_MANAGER" ]; then
 <body>
   <div class="claim-bar">
     <p class="label">⏳ &nbsp;$CLAIM_MSG</p>
-    <a class="cta" href="https://texngo.it/#contact" target="_blank" rel="noopener">
+    <a class="cta" href="$CLAIM_URL" target="_blank" rel="noopener">
       $CLAIM_BTN
     </a>
   </div>
