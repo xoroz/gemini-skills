@@ -277,6 +277,11 @@ async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_del
     """
     POST payload to webhook_url exactly once.
 
+    n8n holds the HTTP connection open until its entire workflow finishes,
+    which can be 30s–several minutes. We therefore use:
+      - connect_timeout = 10s  (catch wrong URL / network down quickly)
+      - read_timeout    = None  (wait as long as n8n needs; we don't need its response body)
+
     initial_delay — seconds to wait before the attempt.
                     Use this for cache-hit paths where n8n's Wait node
                     may not have finished registering its listener yet.
@@ -285,8 +290,14 @@ async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_del
         logger.info(f"⏳ [WEBHOOK] Waiting {initial_delay}s before calling {label} webhook (race-condition guard)")
         await asyncio.sleep(initial_delay)
 
+    # connect_timeout catches bad URLs / network issues fast.
+    # read_timeout=None: n8n keeps the connection alive until its workflow completes —
+    # we must not time out waiting for it; we only care that the POST was delivered.
+    _timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=5.0)
+
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=_timeout) as client:
+            logger.info(f"📤 [WEBHOOK] Posting to {label}...")
             r = await client.post(webhook_url, json=payload)
             if r.status_code < 400:
                 logger.info(f"✅ [WEBHOOK] {label} → HTTP {r.status_code}")
@@ -298,6 +309,7 @@ async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_del
         logger.error(
             f"❌ [WEBHOOK] {label} → failed: {type(exc).__name__}: {exc!r}"
         )
+
 
 
 def _lookup_site_id(slug: str) -> dict | None:
