@@ -2,12 +2,20 @@
 
 # Usage: ./create.sh "Business Name" "Niche" "Address" "Contact Info"
 # Language: Set SITE_LANG=en before running to generate in English (default: it)
-# Mode:     Set MODE=DEV for cheap/fast images (riverflow), MODE=PROD for quality (default: PROD)
+# Mode:     Set MODE=DEV|PROD|SUPER|MOCKUP before running (default: DEV)
+#
+#   DEV   — cheap & fast    img: flux.2-klein-4b ($0.014)  text: gemini-2.5-flash
+#   PROD  — balanced        img: gemini-2.5-flash-image ($0.038, 1K)  text: gemini-3-flash-preview
+#   SUPER — highest quality img: gemini-3.1-flash-image-preview ($0.068, 0.5K)  text: gemini-3.1-pro-preview
+#            NOTE: only gemini-3.1-flash-image-preview supports 0.5K resolution
+#   MOCKUP — skip images (local dummy.png), text: gemini-2.5-flash-lite
 #
 # Examples:
 #   ./create.sh "Officina Mario" "riparazione auto" "Via Roma 42, Milano" "+39 02 1234567"
 #   SITE_LANG=en ./create.sh "Joe's Garage" "auto repair" "123 Main St" "555-1234"
 #   MODE=DEV ./create.sh "Test Salon" "parrucchiere" "Via Test 1" "+39 000"
+#   MODE=PROD ./create.sh "Ristorante Bella" "ristorante" "Via Po 1, Roma" "+39 06 9999"
+#   MODE=SUPER ./create.sh "Hotel Lusso" "luxury hotel" "Piazza Navona 1" "+39 06 1111"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -135,12 +143,16 @@ REMOTE_SITE_URL="${REMOTE_SITE_URL%/}"  # strip trailing slash if any
 # IMAGE MODEL & PRICING
 # Override via .env:  AI_MODEL_IMG, AI_MODEL_TEXT, AI_COST_IMG
 # =============================================================================
-MODE="${MODE:-DEV}"  # DEV = cheap/fast, PROD = quality, MOCKUP = skip billing
+MODE="${MODE:-DEV}"  # DEV = cheap/fast, PROD = balanced quality, SUPER = max quality, MOCKUP = skip billing
 
 if [ "$MODE" = "DEV" ]; then
   IMG_MODEL="${AI_MODEL_IMG:-black-forest-labs/flux.2-klein-4b}"
   IMG_COST_EACH="${AI_COST_IMG:-0.014}"
 elif [ "$MODE" = "PROD" ]; then
+  IMG_MODEL="${AI_MODEL_IMG:-google/gemini-2.5-flash-image}"
+  IMG_COST_EACH="${AI_COST_IMG:-0.038}"
+elif [ "$MODE" = "SUPER" ]; then
+  # NOTE: 0.5K resolution is ONLY supported by gemini-3.1-flash-image-preview
   IMG_MODEL="${AI_MODEL_IMG:-google/gemini-3.1-flash-image-preview}"
   IMG_COST_EACH="${AI_COST_IMG:-0.068}"
 else
@@ -152,7 +164,10 @@ if [ "$MODE" = "MOCKUP" ]; then
   TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash-lite}"
 elif [ "$MODE" = "DEV" ]; then
   TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash}"
+elif [ "$MODE" = "PROD" ]; then
+  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-3-flash-preview}"
 else
+  # SUPER
   TEXT_MODEL="${AI_MODEL_TEXT:-gemini-3.1-pro-preview}"
 fi
 # =============================================================================
@@ -301,8 +316,9 @@ for IMG_NAME in "${!IMAGES[@]}"; do
   RETRY=0
   SUCCESS=false
 
-  # Image resolution: PROD can use 0.5K (only gemini-3.1 supports it), DEV stays at 1K
-  if [ "$MODE" = "PROD" ]; then
+  # Image resolution: SUPER can use 0.5K (ONLY gemini-3.1-flash-image-preview supports it).
+  # PROD uses 1K (gemini-2.5-flash-image does NOT support 0.5K). DEV also stays at 1K.
+  if [ "$MODE" = "SUPER" ]; then
     IMG_SIZE_PARAM="${AI_IMG_SIZE:-0.5K}"
   else
     IMG_SIZE_PARAM="1K"
