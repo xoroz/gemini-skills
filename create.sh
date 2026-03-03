@@ -111,7 +111,15 @@ send_build_summary() {
 on_error() {
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
-        echo "❌ Script failed with exit code $exit_code. Sending error email..."
+        echo "❌ Script failed with exit code $exit_code."
+        # Move failed build to _failed/ for inspection
+        if [ -n "${FOLDER_NAME:-}" ] && [ -d "${FOLDER_NAME:-}" ]; then
+            mkdir -p "sites/_failed"
+            local failed_dest="sites/_failed/$(basename "$FOLDER_NAME")"
+            rm -rf "$failed_dest"
+            mv "$FOLDER_NAME" "$failed_dest"
+            echo "📁 Moved failed build → $failed_dest"
+        fi
         # Avoid trap loops
         trap - EXIT
         send_build_summary "FAILED"
@@ -460,32 +468,50 @@ Do NOT say what you are going to do. Just output the raw HTML directly.
 - Do not output markdown code blocks. Just raw HTML code.
 "
 
-# Function to generate text with retry logic for rate limits
+# Function to generate text with retry logic
+# - Detects truncated HTML (model hit output token limit) and retries
+# - Falls back to DEV model (gemini-2.5-flash) on retry 2
+# - Max 2 retries (3 total attempts)
 generate_text_with_retry() {
   local prompt="$1"
   local output_file="$2"
   local label="$3"
-  local max_retries=3
+  local max_retries=2
   local retry=0
   local success=false
+  local fallback_model="gemini-2.5-flash"  # cheaper/faster, different token capacity
 
   while [ $retry -le $max_retries ]; do
-    # Create temp file for stderr to catch errors without mixing with stdout
     local err_file
     err_file=$(mktemp)
 
-    # Run gemini, redirecting stderr to temp file
     if ! command -v gemini &> /dev/null; then
       echo "❌ Error: gemini command not found in PATH." > "$err_file"
       return 1
     fi
 
-    if echo "$prompt" | gemini -m "$TEXT_MODEL" -y -p "" > "$output_file" 2> "$err_file"; then
-      # Success? Check if the file is empty (sometimes gemini fails silently)
+    # On retry 2: fall back to a different model (avoids hitting the same limit)
+    local use_model="$TEXT_MODEL"
+    if [ $retry -ge 2 ]; then
+      use_model="$fallback_model"
+      echo "     🔄 Falling back to $use_model for retry $retry..."
+    fi
+
+    if echo "$prompt" | gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
+      # Exit code 0 — check if we actually got useful output
       if [ -s "$output_file" ]; then
-        success=true
-        rm -f "$err_file"
-        break
+        # For HTML generation: check for truncation (model hit output token limit)
+        if [ "$label" = "HTML" ] && ! grep -qi "</html" "$output_file"; then
+          local trunc_size
+          trunc_size=$(wc -c < "$output_file" 2>/dev/null || echo 0)
+          echo "     ⚠️  ${label}: Output truncated ($(numfmt --to=iec $trunc_size 2>/dev/null || echo ${trunc_size}B), no </html>). Will retry."
+          echo "[WARN] Truncated HTML on attempt $((retry+1)) with model $use_model" >> "$LOG_FILE"
+          # Fall through to retry logic
+        else
+          success=true
+          rm -f "$err_file"
+          break
+        fi
       else
         echo "Output file was empty (silent failure)" >> "$err_file"
       fi
@@ -505,13 +531,11 @@ generate_text_with_retry() {
 
     # Check for quota/rate limit errors
     if echo "$err_content" | grep -q "MODEL_CAPACITY_EXHAUSTED\|429\|RESOURCE_EXHAUSTED"; then
-        local wait=$((60 * retry))  # 60s, 120s, 180s
-        echo "     ⏳ ${label}: Rate limited (Capacity Exhausted). Waiting ${wait}s before retry $retry/$max_retries..."
+        local wait=$((45 * retry))  # 45s, 90s
+        echo "     ⏳ ${label}: Rate limited. Waiting ${wait}s before retry $retry/$max_retries..."
         sleep $wait
     else
-        # Generic error (network blip, empty response, etc)
         echo "     ⚠️  ${label}: Error encountered. Retrying in 10s... ($retry/$max_retries)"
-        # Log incident but keep going
         echo "[WARN] Retry $retry for $label: $err_content" >> "$LOG_FILE"
         sleep 10
     fi
@@ -573,18 +597,9 @@ if [ "$HTML_SIZE" -eq 0 ]; then
 fi
 
 echo "🔍 Verifying HTML integrity..."
-
-# Check for truncated output (model hit token limit — HTML cut off mid-tag)
-if ! grep -qi "</html" "$FOLDER_NAME/index.html"; then
-  if grep -qi "<html" "$FOLDER_NAME/index.html"; then
-    echo "⚠️  HTML appears truncated (has <html> but no </html>). Model may have hit output token limit."
-    echo "   File size: $(numfmt --to=iec "$HTML_SIZE" 2>/dev/null || echo "${HTML_SIZE}B") — appending closing tags as recovery."
-    # Attempt a best-effort recovery by closing any open tags
-    echo "</div></section></main></body></html>" >> "$FOLDER_NAME/index.html"
-  else
-    echo "❌ Error: index.html is severely malformed (missing root tags)."
-    exit 1
-  fi
+if ! grep -qi "<html" "$FOLDER_NAME/index.html" || ! grep -qi "</html" "$FOLDER_NAME/index.html"; then
+  echo "❌ Error: index.html is malformed or truncated (missing <html> or </html>)."
+  exit 1
 fi
 
 HTML_SIZE_STR=$(numfmt --to=iec "$HTML_SIZE" 2>/dev/null || echo "${HTML_SIZE}B")
