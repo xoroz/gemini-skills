@@ -654,6 +654,16 @@ if [ -f "$ID_MANAGER" ]; then
     # The actual site (index.html / style.css) is NEVER modified — the banner
     # only appears when opening the short ID link (e.g. sites/42.html).
     # To remove: just share the direct slug URL instead of the ID link.
+
+    # Language-aware claim bar copy
+    if [ "$SITE_LANG" = "it" ]; then
+      CLAIM_MSG="Questo sito generato con AI per <strong>$BUSINESS_NAME</strong> è riservato per <strong>48 ore</strong>. Clicca <em>Richiedi</em> per evitare la scadenza del link."
+      CLAIM_BTN="🚀 Richiedi il Sito"
+    else
+      CLAIM_MSG="This AI-generated site for <strong>$BUSINESS_NAME</strong> is reserved for <strong>48 hours</strong>. Click <em>Claim</em> to prevent link expiration."
+      CLAIM_BTN="🚀 Claim Your Site"
+    fi
+
     REDIRECT_FILE="sites/${SITE_ID}.html"
     cat > "$REDIRECT_FILE" <<REDIRECT_EOF
 <!DOCTYPE html>
@@ -716,12 +726,9 @@ if [ -f "$ID_MANAGER" ]; then
 </head>
 <body>
   <div class="claim-bar">
-    <p class="label">
-      👀 &nbsp;This is a <strong>free preview</strong> for <strong>$BUSINESS_NAME</strong> &mdash; not yet live
-    </p>
+    <p class="label">⏳ &nbsp;$CLAIM_MSG</p>
     <a class="cta" href="https://texngo.it/#contact" target="_blank" rel="noopener">
-      <svg viewBox="0 0 20 20"><path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm1 11H9v-2h2v2zm0-4H9V5h2v4z"/></svg>
-      🚀 Claim Your Site
+      $CLAIM_BTN
     </a>
   </div>
   <iframe src="${SITE_SLUG}/index.html" title="$BUSINESS_NAME preview"></iframe>
