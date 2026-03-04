@@ -4,6 +4,103 @@ Complete reference for the flyer generation pipeline, ID registry, and the `id_m
 
 ---
 
+## Workflow: Pre-Creation (Print Before Sites Exist)
+
+The typical use-case: **pre-print 10–50 flyers** with unique QR codes, hand them out,
+then build sites later when a client claims their flyer.
+
+### Step 1 — Batch-generate flyers with `--force`
+
+```bash
+# Generate 10 print-ready TIFF flyers (00A → 00J)
+# --force auto-registers placeholder entries in site-id.json
+uv run scripts/make_flyer.py \
+  --site-id "00A-00J" \
+  --force \
+  --remote-url "https://texngo.it" \
+  --format tiff
+```
+
+This creates:
+
+- **10 TIFF files** in `assets/flyers/` (CMYK, 300 DPI, FOGRA39L)
+- **10 placeholder entries** in `sites/site-id.json` with QR URLs like `https://texngo.it/00B.html`
+
+Each flyer has a unique QR code pointing to `https://texngo.it/<ID>.html` and a tiny `ID: 00B` stamp at the bottom-left.
+
+### Step 2 — Hand out flyers
+
+Print the TIFFs and distribute. Each flyer's QR code leads to a unique URL.
+
+### Step 3 — Client claims a flyer → build their site
+
+When a client with flyer `00B` wants their site:
+
+```bash
+# Build the site (creates the HTML/CSS/images + allocates the slug)
+SITE_ID=00B ./create.sh "Marble Nails di Bertola Giada" "nail art" "Via Roma 1, La Spezia" "+39 0187 123456"
+```
+
+`create.sh` will see `SITE_ID=00B` and assign that ID to the new site.
+
+### Step 4 — Update the registry with real URLs
+
+```bash
+# Point 00B to the production server
+uv run scripts/id_manager.py update \
+  --id 00B \
+  --remote-url "https://texngo.it"
+```
+
+### Step 5 — Regenerate the redirect page
+
+The `create.sh` script already creates `sites/00B.html` (iframe wrapper with Claim CTA).
+If you need to regenerate just the flyer with the updated URL:
+
+```bash
+uv run scripts/make_flyer.py --site-id 00B --format both
+```
+
+### Full lifecycle summary
+
+```
+  ┌─────────────────────────────────────────────────────────┐
+  │ 1. Pre-print:  --force --site-id 00A-00J                │
+  │    → TIFF flyers ready, QR → texngo.it/00X.html         │
+  │    → Placeholder entries in site-id.json                │
+  ├─────────────────────────────────────────────────────────┤
+  │ 2. Hand out flyers to potential clients                  │
+  ├─────────────────────────────────────────────────────────┤
+  │ 3. Client claims flyer 00B → build site:                │
+  │    SITE_ID=00B ./create.sh "Business" "niche" ...       │
+  │    → site built, ID assigned, redirect page created     │
+  ├─────────────────────────────────────────────────────────┤
+  │ 4. Update URL:  id_manager.py update --id 00B ...       │
+  │ 5. Regen flyer: make_flyer.py --site-id 00B --format .. │
+  └─────────────────────────────────────────────────────────┘
+```
+
+### Batch examples
+
+```bash
+# 10 flyers pre-printed:
+uv run scripts/make_flyer.py --site-id "00A-00J" --force --remote-url "https://texngo.it" --format tiff
+
+# Range + individual:
+uv run scripts/make_flyer.py --site-id "00A-00E,01A" --force --remote-url "https://texngo.it"
+
+# Re-generate for existing registry entries (no --force needed):
+uv run scripts/make_flyer.py --site-id "00A-00E" --format both
+
+# Single flyer with explicit name/URL:
+uv run scripts/make_flyer.py --name "My Business" --url "https://texngo.it/00A.html" --site-id 00A
+
+# Uncoated paper:
+uv run scripts/make_flyer.py --site-id "00A-00J" --force --remote-url "https://texngo.it" --paper uncoated
+```
+
+---
+
 ## Architecture Overview
 
 ```
@@ -12,12 +109,12 @@ sites/site-id.json          ← registry (ID ↔ slug ↔ URL mapping)
 scripts/id_manager.py       ← CLI: allocate / assign / lookup / unassign / update
         ↓  called by
 create.sh  (step 9)         ← auto-runs make_flyer.py every build
-create_assets.sh            ← manual standalone wrapper
         ↓
 scripts/make_flyer.py       ← opens template, generates QR, pastes it, stamps ID
         ↓
-assets/flyers/flyer-<slug>.png        ← global output (one file per client)
-sites/<slug>/assets/flyer-<slug>.png  ← copy lives with the site
+assets/flyers/flyer-<ID>.tiff           ← CMYK print-ready (FOGRA39L, 300 DPI)
+assets/flyers/flyer-<ID>.png            ← RGB preview
+sites/<slug>/assets/flyer-<ID>.png      ← PNG copy lives with the site
 ```
 
 **Cost: $0.00** — no AI calls, purely local Pillow + qrcode rendering.
@@ -28,12 +125,48 @@ sites/<slug>/assets/flyer-<slug>.png  ← copy lives with the site
 
 | File | Purpose |
 |---|---|
-| `assets/template-flyer.png` | Branded A5 master (1080×1350 px). Has a QR placeholder box at lower-left. |
-| `scripts/make_flyer.py` | Stamps QR code (and optional Site ID text) onto the template. |
+| `assets/template-flyer.png` | Branded A5 source template (1080×1350 px). |
+| `assets/template-flyer-300dpi.png` | Upscaled print-ready template (1819×2551 px, 300 DPI). |
+| `assets/icc/FOGRA39L_coated.icc` | ICC profile for coated paper (bundled, no system dependency). |
+| `assets/icc/FOGRA47L_uncoated.icc` | ICC profile for uncoated paper. |
+| `scripts/make_flyer.py` | Stamps QR code + ID onto template. Supports batch + force mode. |
+| `scripts/upscale_template.py` | One-shot utility to upscale template to 300 DPI. |
 | `scripts/id_manager.py` | CRUD for `sites/site-id.json`. |
 | `sites/site-id.json` | Flat JSON array — the ID registry. |
-| `create_assets.sh` | Quick manual flyer re-generation from CLI. |
-| `assets/flyers/` | All generated flyer PNGs. |
+| `assets/flyers/` | All generated flyer TIFFs and PNGs. |
+
+---
+
+## Print Specifications (A5)
+
+| Property | Value |
+|---|---|
+| **Trim size** | 148 × 210 mm |
+| **Canvas with bleed** | 154 × 216 mm (3 mm per side) |
+| **Pixels at 300 DPI** | 1819 × 2551 px |
+| **DPI** | 300 (embedded in metadata) |
+| **Color space** | CMYK (TIFF output) |
+| **ICC profile (coated)** | FOGRA39L (`assets/icc/FOGRA39L_coated.icc`) |
+| **ICC profile (uncoated)** | FOGRA47L (`assets/icc/FOGRA47L_uncoated.icc`) |
+| **Safe area** | 5 mm inset from trim (≈94 px from canvas edge) |
+| **Output format** | TIFF (print) + PNG (web preview) |
+| **Min font size** | ≥ 4 pt |
+| **Min line weight** | ≥ 0.5 pt |
+
+---
+
+## Template Geometry (300 DPI)
+
+The QR code is pasted into a pre-measured box inside the 1819×2551 template:
+
+```
+Template   : 1819×2551 px @ 300 DPI
+QR box     : x=115, y=1640, width=367, height=367 px
+QR inset   : 6 px (padding inside the box)
+QR size    : 355×355 px
+ID text    : "ID: 00A" at (94, 2457) in soft gray #B4AAA0
+Safe area  : 94 px from each edge (bleed 35 px + margin 59 px)
+```
 
 ---
 
@@ -52,59 +185,24 @@ Total capacity: **2600 unique IDs**.
 ## QR URL Priority (in `create.sh`)
 
 ```
-1. SITE_URLID set? → use short redirect  (e.g. http://dev.texngo.it/00A.html)
-2. REMOTE_SITE_URL set? → use slug URL   (e.g. http://dev.texngo.it/ristorante-da-mario/)
+1. SITE_URLID set? → use short redirect  (e.g. https://texngo.it/00A.html)
+2. REMOTE_SITE_URL set? → use slug URL   (e.g. https://texngo.it/ristorante-da-mario/)
 3. Neither set? → https://<slug>.texngo.it
-```
-
----
-
-## Template Geometry
-
-The QR code is pasted into a pre-measured box inside the 1080×1350 template:
-
-```
-QR box  : x=68, y=868, width=218, height=218 px
-Inset   : 4 px (padding inside the box)
-QR size : 210×210 px
-ID text : "ID: 00A" at (14, h-30) in soft gray #B4AAA0
 ```
 
 ---
 
 ## DEV vs PROD — Registry Isolation
 
-By default both DEV and PROD runs write to the same `sites/site-id.json`.
-This pollutes real production IDs with test entries.
-
-### Solution: `SITE_ID_REGISTRY` environment variable
-
-`id_manager.py` reads the registry path from `SITE_ID_REGISTRY` if set:
+By default, `MODE=DEV` or `MODE=MOCKUP` uses `sites/site-id-dev.json`,
+while `MODE=PROD` (or unset) uses `sites/site-id.json`.
 
 ```bash
-# In .env (or export in shell):
-SITE_ID_REGISTRY=sites/site-id-dev.json    # for MODE=DEV / test runs
-# SITE_ID_REGISTRY=sites/site-id.json      # default (production)
-```
+# Explicit override:
+SITE_ID_REGISTRY=sites/site-id-dev.json uv run scripts/id_manager.py list
 
-Or per-run:
-
-```bash
-SITE_ID_REGISTRY=sites/site-id-dev.json MODE=DEV ./create.sh "Test Salon" ...
-```
-
-`create.sh` forwards the env var automatically because Python inherits the environment.
-
-### Recommended `.env` setup
-
-```ini
-# .env (DEV machine / test workflow)
-MODE=DEV
-SITE_ID_REGISTRY=sites/site-id-dev.json
-
-# .env (production server)
-MODE=PROD
-# SITE_ID_REGISTRY not set → defaults to sites/site-id.json
+# Or just set MODE:
+MODE=DEV uv run scripts/make_flyer.py --site-id "00A-00E" --force --remote-url "https://dev.texngo.it"
 ```
 
 ---
@@ -198,7 +296,7 @@ uv run scripts/id_manager.py update \
 
 - Updates both `url` and `url_id` in the registry for the matched entry.
 - Useful when promoting a site from DEV URL to PROD URL.
-- You should then re-run `create_assets.sh` or call `POST /flyer/{id}` from the API to regenerate the flyer with the new QR code.
+- You should then re-run `make_flyer.py` to regenerate the flyer with the new QR code.
 
 ---
 
@@ -212,13 +310,37 @@ Prints a human-readable table of all IDs, slugs, and URLs in the current registr
 
 ---
 
-## `create_assets.sh` — Manual Flyer Re-generation
+## `make_flyer.py` — Full CLI Reference
 
 ```bash
-./create_assets.sh "Business Name" "https://preview-url.texngo.it"
+uv run scripts/make_flyer.py [options]
 ```
 
-Outputs to `assets/flyers/flyer-<slug>.png` and copies to `sites/<slug>/` if that folder exists.
+### Key arguments
+
+| Argument | Description |
+|---|---|
+| `--site-id` | Single ID (`00A`), range (`00A-00E`), or mixed (`00A-00E,01A`) |
+| `--force` | Pre-create: register missing IDs as placeholders |
+| `--remote-url` | Base URL for QR codes with `--force` (e.g. `https://texngo.it`) |
+| `--name` | Business name (single-flyer mode) |
+| `--url` | QR code URL (single-flyer mode) |
+| `--format` | `tiff` (CMYK print), `png` (RGB), `both` (default) |
+| `--paper` | `coated` (FOGRA39L, default) or `uncoated` (FOGRA47L) |
+| `--template` | Custom template path (default: `assets/template-flyer-300dpi.png`) |
+| `--output-dir` | Output directory (default: `assets/flyers/`) |
+| `--dpi` | DPI override (default: 300) |
+
+---
+
+## `create.sh` — Flyer Output Split
+
+When `create.sh` builds a site, it generates both formats:
+
+| Format | Location | Purpose |
+|---|---|---|
+| **TIFF** (CMYK) | `assets/flyers/flyer-<ID>.tiff` | Send to print shop |
+| **PNG** (RGB) | `sites/<slug>/assets/flyer-<ID>.png` | Web preview / download |
 
 ---
 

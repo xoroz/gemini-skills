@@ -804,8 +804,13 @@ echo ""
 
 # 9. GENERATE FLYER
 MAKE_FLYER_SCRIPT="$SCRIPT_DIR/scripts/make_flyer.py"
-FLYER_TEMPLATE="$SCRIPT_DIR/assets/template-flyer.png"
-FLYER_NAME="flyer-${SITE_SLUG}.png"
+# Prefer 300 DPI template; fall back to legacy if not available yet
+if [ -f "$SCRIPT_DIR/assets/template-flyer-300dpi.png" ]; then
+  FLYER_TEMPLATE="$SCRIPT_DIR/assets/template-flyer-300dpi.png"
+else
+  FLYER_TEMPLATE="$SCRIPT_DIR/assets/template-flyer.png"
+fi
+FLYER_NAME="flyer-${SITE_ID:-${SITE_SLUG}}"
 FLYER_ASSETS_DIR="$SCRIPT_DIR/assets/flyers"
 FLYER_ASSETS_OUT="$FLYER_ASSETS_DIR/$FLYER_NAME"
 FLYER_SITE_OUT="$SCRIPT_DIR/$FOLDER_NAME/assets/$FLYER_NAME"
@@ -835,10 +840,12 @@ if [ -f "$MAKE_FLYER_SCRIPT" ] && [ -f "$FLYER_TEMPLATE" ]; then
       --url      "$FLYER_QR_URL" \
       --template "$FLYER_TEMPLATE" \
       --output   "$FLYER_ASSETS_OUT" \
+      --format   both \
       "${FLYER_ID_ARGS[@]}" 2>&1 | sed 's/^/   /'; then
-    # Copy into the site's assets folder too
-    cp "$FLYER_ASSETS_OUT" "$FLYER_SITE_OUT"
-    echo "   📋 Also saved → $FOLDER_NAME/assets/$FLYER_NAME"
+    # TIFF (print) stays in assets/flyers/, PNG (preview) goes to site assets
+    [ -f "${FLYER_ASSETS_OUT}.png" ] && cp "${FLYER_ASSETS_OUT}.png" "${FLYER_SITE_OUT}.png"
+    echo "   📋 TIFF (print) → assets/flyers/${FLYER_NAME}.tiff"
+    echo "   📋 PNG (preview) → $FOLDER_NAME/assets/${FLYER_NAME}.png"
     echo "✅ Flyer ready!"
   else
     echo "⚠️  Flyer generation failed — site is still complete."
@@ -913,12 +920,13 @@ echo "  │   ├── gallery-2.png"
 echo "  │   ├── hero.png"
 echo "  │   ├── process.png"
 echo "  │   ├── workshop.png"
-echo "  │   └── $FLYER_NAME"
+echo "  │   ├── ${FLYER_NAME}.png"
+echo "  │   └── ${FLYER_NAME}.tiff"
 echo "  ├── index.html"
 echo "  ├── style.css"
 echo "  └── build.log"
 echo ""
-echo "  🖨️  Flyer (global): assets/flyers/$FLYER_NAME"
+echo "  🖨️  Flyer (global): assets/flyers/${FLYER_NAME}.{png,tiff}"
 echo ""
 echo "  📋 Full log: $LOG_FILE"
 echo ""
