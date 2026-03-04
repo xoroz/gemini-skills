@@ -299,12 +299,12 @@ echo "   Mode: $MODE  |  Model: $IMG_MODEL  |  ~\$${IMG_COST_EACH}/img"
 echo ""
 
 declare -A IMAGES
-IMAGES["hero"]="Professional high-quality hero photograph for a $NICHE business called $BUSINESS_NAME. Showcase the main product or service in a dramatic, cinematic style with beautiful lighting. Premium commercial photography feel."
-IMAGES["gallery-1"]="Professional gallery photograph for a $NICHE business. Showcase a completed project or product in pristine condition. Studio-quality lighting, clean background. Commercial photography."
-IMAGES["gallery-2"]="Professional gallery photograph for a $NICHE business. Different angle or product than the first gallery image. Beautiful detail shot with dramatic lighting. High-end commercial photography."
-IMAGES["workshop"]="Interior photograph of a professional $NICHE workshop or workspace. Clean, organized, well-lit environment showing tools and equipment. Professional commercial photography."
-IMAGES["detail"]="Close-up detail photograph relevant to $NICHE. Macro shot showing craftsmanship, quality materials, or intricate work. Professional product photography with shallow depth of field."
-IMAGES["process"]="Action photograph showing the $NICHE work process. Skilled hands at work, step-by-step craftsmanship in progress. Documentary-style commercial photography with warm lighting."
+IMAGES["hero"]="Cinematic wide-angle shot of $BUSINESS_NAME ($NICHE). Focal point on the primary service/product with dramatic rim lighting. 8k resolution, shot on 35mm lens, high contrast, elegant commercial aesthetic, depth of field."
+IMAGES["gallery-1"]="Pristine studio photograph of a $NICHE project. Neutral minimalist background, softbox lighting to eliminate harsh shadows, sharp focus, industrial design aesthetic, clean lines."
+IMAGES["gallery-2"]="Alternative low-angle perspective of $NICHE equipment/product. Bold composition, accent lighting highlighting textures, high-end commercial catalog style, crisp details."
+IMAGES["workshop"]="Wide interior shot of a $NICHE facility. Organized workspace, overhead industrial lighting mixed with natural window light, lived-in but clean professional atmosphere, bokeh background."
+IMAGES["detail"]="Macro photography of $NICHE craftsmanship. Focus on material texture (metal, wood, or tech), shallow depth of field (f/2.8), warm golden hour lighting, hyper-realistic, intricate details."
+IMAGES["process"]="Action candid of $NICHE workflow. Motion blur on hands, tactile engagement with tools, authentic workshop environment, documentary style, 4000k color temperature, professional grit."
 
 IMG_COUNT=0
 IMG_TOTAL=${#IMAGES[@]}
