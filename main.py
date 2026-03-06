@@ -210,6 +210,11 @@ class BusinessData(BaseModel):
     tel: str
     webhook_url: str  # For n8n asynchronous callback
 
+class ModifySiteData(BaseModel):
+    site_slug: str
+    target_selector: str
+    prompt: str
+
 def clean_google_text(text: str) -> str:
     if not text:
         return ""
@@ -826,3 +831,51 @@ async def scrape_google_maps(
             detail=f"Scrape timed out after {SCRAPE_TIMEOUT // 60} minutes. "
                    "Google Maps may be slow or blocking the request."
         )
+
+# ==========================================
+# 5. SITE EDITOR
+# ==========================================
+
+@app.post("/modify-site", dependencies=[Depends(verify_token)], tags=["sites"])
+async def modify_site(data: ModifySiteData):
+    """
+    Modify an AI-generated site by specifying a CSS selector and an AI prompt.
+    Runs the modify.sh script and returns the result.
+    """
+    script_path = "./modify.sh"
+    if not os.path.exists(script_path):
+        raise HTTPException(status_code=500, detail="modify.sh not found on server")
+
+    # This is a simple POC; we wait for the process to finish
+    try:
+        logger.info(f"⚙️ [MODIFY] Starting modification for site: {data.site_slug}, selector: {data.target_selector}")
+        process = await asyncio.create_subprocess_exec(
+            script_path, data.site_slug, data.target_selector, data.prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        
+        if process.returncode == 0:
+            logger.info(f"✅ [MODIFY] Success for {data.site_slug}")
+            return {
+                "status": "success",
+                "site_slug": data.site_slug,
+                "message": "Site successfully modified."
+            }
+        else:
+            err_text = stderr.decode(errors="replace").strip()
+            out_text = stdout.decode(errors="replace").strip()
+            logger.error(f"❌ [MODIFY] Failed: {err_text} | {out_text}")
+            raise HTTPException(status_code=500, detail=f"Modification failed: {err_text}")
+            
+    except asyncio.TimeoutError:
+         logger.warning(f"⏰ [MODIFY] Timeout hit for: {data.site_slug}")
+         try:
+             process.kill()
+         except: pass
+         raise HTTPException(status_code=504, detail="Modification timed out.")
+    except Exception as e:
+         logger.error(f"🔥 [MODIFY] Unexpected error: {e}")
+         raise HTTPException(status_code=500, detail=str(e))
