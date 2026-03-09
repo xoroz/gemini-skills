@@ -71,6 +71,25 @@ SCRIPT_DIR  = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 
 # ---------------------------------------------------------------------------
+# Load .env from project root (simple key=value parser, no dependencies)
+# ---------------------------------------------------------------------------
+def _load_dotenv() -> None:
+    env_file = PROJECT_DIR / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+_load_dotenv()
+
+# ---------------------------------------------------------------------------
 # Print specs — A5 + 3 mm bleed @ 300 DPI
 # ---------------------------------------------------------------------------
 DPI          = 300
@@ -454,8 +473,8 @@ With --force, missing IDs are auto-registered as placeholders.
     ap.add_argument("--site-id",  default=None,  help="Site ID or range (e.g. 00A, 00A-00E, 00A-00E,01A)")
     ap.add_argument("--force",    action="store_true",
                     help="Force-create flyers for IDs not yet in registry (pre-print mode)")
-    ap.add_argument("--remote-url", default="",
-                    help="Base URL for QR codes when --force creating (e.g. https://texngo.it)")
+    ap.add_argument("--remote-url", default=os.environ.get("REMOTE_SITE_URL", ""),
+                    help="Base URL for QR codes (default: $REMOTE_SITE_URL from .env)")
 
     # --- Paths ---
     ap.add_argument("--template", default=None,
