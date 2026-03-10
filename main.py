@@ -1004,7 +1004,7 @@ async def assign_site(data: AssignSiteData):
              "--id", data.site_id,
              "--slug", data.site_slug,
              "--remote-url", remote_url],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=os.environ.copy()
         )
         if result.returncode == 0:
             return {

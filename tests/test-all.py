@@ -818,6 +818,57 @@ def _playwright_dom_checks(page, screenshot: Path):
         warn("No contact keywords found in body text")
 
 
+# ─── Step 2.6: Test Flyers & Assignment ───────────────────────────────────────
+def test_flyers_assign():
+    print(f"\n{YELLOW}[Step 2.6] Test /create-flyers and /assign-site{NC}")
+    
+    # Test Create Flyers
+    try:
+        r = httpx.post(f"{BASE_URL}/create-flyers", json={"qnt": 1}, headers=AUTH_HEADERS, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if "created_ids" in data and len(data["created_ids"]) == 1:
+                created_id = data["created_ids"][0]
+                ok(f"Created flyer placeholder ID: {created_id}")
+            else:
+                fail("Flyer creation did not return expected created_ids")
+                return
+        else:
+            fail(f"/create-flyers returned HTTP {r.status_code}")
+            return
+    except Exception as e:
+        fail(f"/create-flyers failed: {e}")
+        return
+
+    # Create dummy folder to test assignment
+    test_slug = "test-assignment-slug"
+    test_site_dir = SITES_DIR / test_slug
+    test_site_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Wait briefly for background id_manager to flush if needed
+    import time
+    time.sleep(2)
+    
+    # Test Assign Site
+    try:
+        r = httpx.post(
+            f"{BASE_URL}/assign-site", 
+            json={"site_id": created_id, "site_slug": test_slug}, 
+            headers=AUTH_HEADERS, 
+            timeout=10
+        )
+        if r.status_code == 200:
+            ok(f"Assigned ID {created_id} to slug '{test_slug}' successfully")
+        else:
+            fail(f"/assign-site returned HTTP {r.status_code}: {r.text}")
+    except Exception as e:
+        fail(f"/assign-site failed: {e}")
+    finally:
+        # Cleanup
+        if test_site_dir.exists():
+            test_site_dir.rmdir()
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     print()
@@ -847,6 +898,10 @@ def main():
 
     # Step 2.5: Quantity cap & cache invalidation regression tests
     step_scrape_cache_and_qty()
+    sep()
+
+    # Step 2.6: Test flyer endpoints
+    test_flyers_assign()
     sep()
 
     # Step 3: Trigger build (always runs — it's just an API call)
