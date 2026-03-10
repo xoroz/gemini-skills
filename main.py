@@ -1051,16 +1051,19 @@ async def redirect_site(filename: str):
     registry = id_manager._load_registry()
     for entry in registry:
         if entry.get("id", "").upper() == site_id:
-            target_url = entry.get("url")
-            if target_url:
-                if not target_url.startswith("http"):
-                    base = REMOTE_SITE_URL or "https://dev.texngo.it"
-                    target_url = f"{base.rstrip('/')}/{target_url}"
-                
-                business_name = entry.get("business_name", "Local Business")
-                encoded_name = urllib.parse.quote(business_name)
-                
-                html_content = f"""<!DOCTYPE html>
+            # Prefer the full site URL, fall back to url_id (the short redirect URL)
+            target_url = entry.get("url") or entry.get("url_id") or ""
+            if target_url and not target_url.startswith("http"):
+                base = REMOTE_SITE_URL or "https://dev.texngo.it"
+                target_url = f"{base.rstrip('/')}/{target_url}"
+            
+            business_name = entry.get("business_name", "Local Business")
+            # Clean up placeholder names for display
+            if business_name.startswith("(reserved"):
+                business_name = f"Site {site_id}"
+            encoded_name = urllib.parse.quote(business_name)
+            
+            html_content = f"""<!DOCTYPE html>
 <html lang="it">
 <head>
 <meta charset="utf-8">
@@ -1128,9 +1131,6 @@ async def redirect_site(filename: str):
   <iframe src="{target_url}" title="{business_name} preview"></iframe>
 </body>
 </html>"""
-                return HTMLResponse(content=html_content)
-            else:
-                # Placeholder, not assigned yet or waiting for generation
-                raise HTTPException(status_code=404, detail=f"Site {site_id} is reserved but not active yet.")
+            return HTMLResponse(content=html_content)
                 
     raise HTTPException(status_code=404, detail=f"Site ID {site_id} not found.")
