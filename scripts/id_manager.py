@@ -265,34 +265,54 @@ def unassign(site_id: str | None = None, slug: str | None = None) -> None:
 
 
 def update(remote_url: str, site_id: str | None = None, slug: str | None = None) -> dict:
-    """Update the URL and url_id for an existing entry (e.g. DEV → PROD promotion)."""
+    """
+    Update an entry in the registry.
+    
+    When called with --id AND --slug:
+      → Find entry by ID, then OVERWRITE its slug/business_name/url with the new slug.
+    When called with --id only:
+      → Find entry by ID, update URLs only.
+    When called with --slug only:
+      → Find entry by slug, update URLs only.
+    """
     registry = _load_registry()
     remote_url = remote_url.rstrip("/")
 
     target = None
-    for entry in registry:
-        if site_id and entry.get("id", "").upper() == site_id.upper():
-            target = entry
-            break
-        if slug and entry.get("slug") == slug:
-            target = entry
-            break
+    new_slug = None  # The slug to assign (when both --id and --slug are given)
+    
+    if site_id and slug:
+        # Both provided: search by ID, use slug as the NEW value
+        new_slug = slug
+        for entry in registry:
+            if entry.get("id", "").upper() == site_id.upper():
+                target = entry
+                break
+    elif site_id:
+        # ID only: search by ID
+        for entry in registry:
+            if entry.get("id", "").upper() == site_id.upper():
+                target = entry
+                break
+    elif slug:
+        # Slug only: search by slug
+        for entry in registry:
+            if entry.get("slug") == slug:
+                target = entry
+                break
 
     if target is None:
-        print("❌ Error: Entry not found — nothing was changed.", file=sys.stderr)
+        print(f"❌ Error: Entry not found (id={site_id}, slug={slug}) — nothing was changed.", file=sys.stderr)
         sys.exit(1)
 
     old_url    = target.get("url", "")
     old_url_id = target.get("url_id", "")
+    old_slug   = target.get("slug", "")
 
-    # If assigning a generated site to a placeholder ID, update the slug and business name
-    if site_id and slug and target["slug"].startswith("reserved-"):
-        target["slug"] = slug
-        target["business_name"] = slug.replace("-", " ").title()
-    elif site_id and slug and target["slug"] != slug:
-        target["slug"] = slug
-        if target.get("business_name", "").startswith("(reserved"):
-            target["business_name"] = slug.replace("-", " ").title()
+    # Always overwrite slug and business_name when a new slug is provided
+    if new_slug and new_slug != old_slug:
+        target["slug"] = new_slug
+        target["business_name"] = new_slug.replace("-", " ").title()
 
     target["url"]    = f"{remote_url}/{target['slug']}/index.html"
     target["url_id"] = f"{remote_url}/{target['id']}.html"
@@ -303,6 +323,8 @@ def update(remote_url: str, site_id: str | None = None, slug: str | None = None)
     print(f"✅ Updated entry: ID={target['id']}  slug={target['slug']}")
     print(f"   url    : {old_url}  →  {target['url']}")
     print(f"   url_id : {old_url_id}  →  {target['url_id']}")
+    if old_slug != target['slug']:
+        print(f"   slug   : {old_slug}  →  {target['slug']}")
     print(f"   ⚠️  Remember to regenerate the flyer so the QR code reflects the new URL.")
     _print_result(target)
     return target
