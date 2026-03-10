@@ -579,6 +579,10 @@ With --force, missing IDs are auto-registered as placeholders.
         skipped  = 0
         created  = 0
         for i, sid in enumerate(ids, 1):
+            # Reload registry in each iteration to avoid race conditions.
+            # Batch generation takes time, so concurrent updates might happen.
+            registry = _load_registry()
+            
             entry = _lookup_id(registry, sid)
 
             if not entry and not force:

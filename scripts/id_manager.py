@@ -285,6 +285,15 @@ def update(remote_url: str, site_id: str | None = None, slug: str | None = None)
     old_url    = target.get("url", "")
     old_url_id = target.get("url_id", "")
 
+    # If assigning a generated site to a placeholder ID, update the slug and business name
+    if site_id and slug and target["slug"].startswith("reserved-"):
+        target["slug"] = slug
+        target["business_name"] = slug.replace("-", " ").title()
+    elif site_id and slug and target["slug"] != slug:
+        target["slug"] = slug
+        if target.get("business_name", "").startswith("(reserved"):
+            target["business_name"] = slug.replace("-", " ").title()
+
     target["url"]    = f"{remote_url}/{target['slug']}/index.html"
     target["url_id"] = f"{remote_url}/{target['id']}.html"
 
