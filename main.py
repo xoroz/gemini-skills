@@ -1164,7 +1164,7 @@ async def redirect_site(filename: str):
 <body>
   <div class="claim-bar">
     <p class="label">⏳ &nbsp;Questo sito generato con AI per <strong>{business_name}</strong> è riservato per <strong>48 ore</strong>. Clicca <em>Richiedi</em> per evitare la scadenza del link.</p>
-    <a class="cta" href="https://texngo.it/?name={encoded_name}&message=S%C3%AC%2C+voglio+il+mio+sito+fatto+da+voi%21&focus=email#contact" target="_blank" rel="noopener">
+    <a class="cta" href="https://texngo.it/?business={encoded_name}&message=S%C3%AC%2C+voglio+il+mio+sito+fatto+da+voi%21&focus=email#contact" target="_blank" rel="noopener">
       🚀 Richiedi il Sito
     </a>
   </div>
