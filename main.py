@@ -216,6 +216,13 @@ class ModifySiteData(BaseModel):
     target_selector: str
     prompt: str
 
+class CreateFlyersData(BaseModel):
+    qnt: int
+
+class AssignSiteData(BaseModel):
+    site_id: str
+    site_slug: str
+
 def clean_google_text(text: str) -> str:
     if not text:
         return ""
@@ -880,3 +887,137 @@ async def modify_site(data: ModifySiteData):
     except Exception as e:
          logger.error(f"🔥 [MODIFY] Unexpected error: {e}")
          raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# 6. FLYER MANAGER
+# ==========================================
+
+async def generate_flyers_bg(current_ids: list[str], remote_url: str):
+    """Background task to run make_flyer.py with the new range of IDs."""
+    if not current_ids:
+        return
+        
+    start_id = current_ids[0]
+    end_id = current_ids[-1]
+    id_range = f"{start_id}-{end_id}" if len(current_ids) > 1 else start_id
+    
+    script_path = "./scripts/make_flyer.py"
+    if not os.path.exists(script_path):
+        logger.error("❌ [FLYER] make_flyer.py not found on server")
+        return
+        
+    try:
+        logger.info(f"⚙️ [FLYER] Starting flyer generation for range: {id_range}")
+        process = await asyncio.create_subprocess_exec(
+            "uv", "run", script_path, 
+            "--site-id", id_range,
+            "--force",
+            "--remote-url", remote_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
+        
+        if process.returncode == 0:
+            logger.info(f"✅ [FLYER] Success for range {id_range}")
+            # Try to create symlink for downloads
+            try:
+                assets_dir = os.path.abspath("assets/flyers")
+                sites_flyers = os.path.abspath("sites/flyers")
+                if not os.path.exists(sites_flyers) and os.path.exists(assets_dir):
+                    os.symlink(assets_dir, sites_flyers)
+                    logger.info(f"🔗 [FLYER] Created symlink from {assets_dir} to {sites_flyers}")
+            except Exception as e:
+                logger.warning(f"⚠️ [FLYER] Failed to create symlink: {e}")
+        else:
+            err_text = stderr.decode(errors="replace").strip()
+            logger.error(f"❌ [FLYER] Failed: {err_text}")
+    except asyncio.TimeoutError:
+        logger.warning(f"⏰ [FLYER] Timeout hit for range: {id_range}")
+        try:
+            process.kill()
+        except: pass
+    except Exception as e:
+        logger.error(f"🔥 [FLYER] Unexpected error: {e}")
+
+@app.post("/create-flyers", dependencies=[Depends(verify_token)], tags=["sites"])
+async def create_flyers(data: CreateFlyersData, background_tasks: BackgroundTasks):
+    """
+    Generate new pre-print flyers without overwriting existing ones.
+    Allocates new placeholder IDs in the registry.
+    """
+    if data.qnt <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be greater than 0")
+        
+    if data.qnt > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 flyers per request allowed")
+        
+    # We will use id_manager's core logic to calculate the next N IDs quickly
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), "scripts"))
+    try:
+        import id_manager
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Failed to load id_manager module")
+        
+    registry = id_manager._load_registry()
+    existing_ids = [e["id"] for e in registry if "id" in e]
+    
+    new_ids = []
+    for _ in range(data.qnt):
+        nxt = id_manager._next_id(existing_ids)
+        new_ids.append(nxt)
+        existing_ids.append(nxt)
+        
+    if not new_ids:
+        raise HTTPException(status_code=500, detail="Failed to calculate new IDs")
+        
+    # The actual generation is passed to background
+    remote_url = REMOTE_SITE_URL or "https://dev.texngo.it"
+    background_tasks.add_task(generate_flyers_bg, new_ids, remote_url)
+    
+    return {
+        "status": "processing",
+        "message": f"Job added to generate {data.qnt} flyers in background.",
+        "created_ids": new_ids,
+        "range": f"{new_ids[0]}-{new_ids[-1]}" if len(new_ids) > 1 else new_ids[0]
+    }
+
+@app.post("/assign-site", dependencies=[Depends(verify_token)], tags=["sites"])
+async def assign_site(data: AssignSiteData):
+    """
+    Assign an existing pre-printed site ID to an actual generated site.
+    Validates that the site directory exists and updates the registry.
+    """
+    site_dir = os.path.join("sites", data.site_slug)
+    if not os.path.exists(site_dir) or not os.path.isdir(site_dir):
+        raise HTTPException(status_code=404, detail=f"Site directory for '{data.site_slug}' not found.")
+        
+    remote_url = REMOTE_SITE_URL or "https://dev.texngo.it"
+    
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["uv", "run", "scripts/id_manager.py", "update",
+             "--id", data.site_id,
+             "--slug", data.site_slug,
+             "--remote-url", remote_url],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return {
+                "status": "success",
+                "message": f"Successfully assigned ID {data.site_id} to slug '{data.site_slug}'.",
+                "output": result.stdout.strip()
+            }
+        else:
+            logger.error(f"❌ [ASSIGN] id_manager failed: {result.stderr}")
+            raise HTTPException(status_code=400, detail=f"Failed to assign: {result.stderr.strip()}")
+            
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Operation timed out")
+    except Exception as e:
+        logger.error(f"🔥 [ASSIGN] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
