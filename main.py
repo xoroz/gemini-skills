@@ -1051,16 +1051,30 @@ async def redirect_site(filename: str):
     registry = id_manager._load_registry()
     for entry in registry:
         if entry.get("id", "").upper() == site_id:
-            # Prefer the full site URL, fall back to url_id (the short redirect URL)
-            target_url = entry.get("url") or entry.get("url_id") or ""
+            base = REMOTE_SITE_URL or "https://dev.texngo.it"
+            slug = entry.get("slug", "")
+            
+            # Build the iframe URL: always point to the actual site, NEVER to url_id
+            # (url_id is this same page → infinite recursion!)
+            target_url = entry.get("url", "")
+            if not target_url and slug and not slug.startswith("reserved-"):
+                # URL not set yet but slug is real → build it
+                target_url = f"{base.rstrip('/')}/{slug}/index.html"
+            elif not target_url:
+                # Truly unassigned placeholder → point to a coming-soon page
+                target_url = ""
+            # Make relative URLs absolute
             if target_url and not target_url.startswith("http"):
-                base = REMOTE_SITE_URL or "https://dev.texngo.it"
                 target_url = f"{base.rstrip('/')}/{target_url}"
             
-            business_name = entry.get("business_name", "Local Business")
-            # Clean up placeholder names for display
-            if business_name.startswith("(reserved"):
-                business_name = f"Site {site_id}"
+            # Business name: use actual name from registry
+            business_name = entry.get("business_name", "")
+            if not business_name or business_name.startswith("(reserved"):
+                # Try to derive a readable name from the slug
+                if slug and not slug.startswith("reserved-"):
+                    business_name = slug.replace("-", " ").title()
+                else:
+                    business_name = f"Site {site_id}"
             encoded_name = urllib.parse.quote(business_name)
             
             html_content = f"""<!DOCTYPE html>
