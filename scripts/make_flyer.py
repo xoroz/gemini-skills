@@ -443,6 +443,18 @@ def stamp_flyer(
     print(f"   QR box   : x={qr_box_x} y={qr_box_y} {qr_box_w}×{qr_box_h} px")
     print(f"   QR size  : {qr_size}×{qr_size} px  (inset {qr_inset} px)")
     print(f"   Paper    : {paper}  |  ICC: {ICC_PATHS.get(paper, 'N/A')}")
+    
+    # ── Log action ────────────────────────────────────────────────────────
+    from datetime import datetime
+    logs_dir = Path(__file__).parent.parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "make_flyer.log"
+    timestamp = datetime.now().isoformat()
+    # Format: [YYYY-MM-DDTHH:MM:SS] GENERATED: ID=xxx URL=xxx PATH=xxx
+    with log_file.open("a", encoding="utf-8") as f:
+        sid_str = site_id if site_id else "NONE"
+        paths_str = ", ".join([p[1] for p in saved_files])
+        f.write(f"[{timestamp}] GENERATED: ID={sid_str} URL={url} PATHS=[{paths_str}]\n")
 
 
 # ---------------------------------------------------------------------------

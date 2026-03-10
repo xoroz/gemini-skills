@@ -147,6 +147,17 @@ def _save_registry(entries: list[dict]) -> None:
     )
 
 
+def _log_action(action: str, details: str) -> None:
+    from datetime import datetime
+    logs_dir = PROJECT_DIR / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "id_manager.log"
+    timestamp = datetime.now().isoformat()
+    # Format: [YYYY-MM-DDTHH:MM:SS] ACTION: details
+    with log_file.open("a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {action}: {details}\n")
+
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
@@ -209,6 +220,7 @@ def _assign_write(site_id: str, business_name: str, slug: str, remote_url: str, 
     }
     registry.append(entry)
     _save_registry(registry)
+    _log_action("ASSIGN", f"ID={site_id} slug={slug}")
     _print_result(entry)
     return entry
 
@@ -246,6 +258,7 @@ def unassign(site_id: str | None = None, slug: str | None = None) -> None:
 
     registry.remove(to_remove)
     _save_registry(registry)
+    _log_action("UNASSIGN", f"ID={to_remove['id']} slug={to_remove['slug']}")
     print(f"✅ Unassigned: ID={to_remove['id']}  slug={to_remove['slug']}")
     print(f"   The ID '{to_remove['id']}' is now free and will be re-used by the next allocate.")
     print(f"   Registry: {REGISTRY_FILE}")
@@ -276,6 +289,7 @@ def update(remote_url: str, site_id: str | None = None, slug: str | None = None)
     target["url_id"] = f"{remote_url}/{target['id']}.html"
 
     _save_registry(registry)
+    _log_action("UPDATE", f"ID={target['id']} slug={target['slug']} -> {target['url']}")
 
     print(f"✅ Updated entry: ID={target['id']}  slug={target['slug']}")
     print(f"   url    : {old_url}  →  {target['url']}")
