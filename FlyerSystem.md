@@ -11,22 +11,29 @@ then build sites later when a client claims their flyer.
 
 ### Step 1 — Batch-generate flyers with `--force`
 
+ID format is `NNL` (two digits + letter A). Each ID gets its own unique QR code pointing to `$REMOTE_SITE_URL/<ID>.html`.
+`REMOTE_SITE_URL` is read automatically from `.env` — no need to pass `--remote-url`.
+
 ```bash
-# Generate 10 print-ready TIFF flyers (00A → 00J)
+# Generate 50 print-ready TIFF flyers (00A → 49A) — Campaign 1
+# IDs use letter A, number increments: 00A, 01A, 02A … 49A
 # --force auto-registers placeholder entries in site-id.json
+IDS=$(seq -f "%02.0fA" 0 49 | tr '\n' ',' | sed 's/,$//') && \
 uv run scripts/make_flyer.py \
-  --site-id "00A-00J" \
+  --site-id "$IDS" \
   --force \
-  --remote-url "https://texngo.it" \
   --format tiff
 ```
 
 This creates:
 
-- **10 TIFF files** in `assets/flyers/` (CMYK, 300 DPI, FOGRA39L)
-- **10 placeholder entries** in `sites/site-id.json` with QR URLs like `https://texngo.it/00B.html`
+- **50 TIFF files** in `assets/flyers/` (CMYK, 300 DPI, FOGRA39L)
+- **50 placeholder entries** in `sites/site-id.json`
+- Each QR points to its own URL: `https://dev.texngo.it/00A.html`, `01A.html`, etc.
 
-Each flyer has a unique QR code pointing to `https://texngo.it/<ID>.html` and a tiny `ID: 00B` stamp at the bottom-left.
+Each flyer has a unique QR code pointing to `$REMOTE_SITE_URL/<ID>.html` and a tiny `ID: 00A` stamp at the bottom-left.
+
+> **Campaign 1 (completed 2026-03-09):** 50 flyers generated — `00A` → `49A` → `https://dev.texngo.it/<ID>.html`
 
 ### Step 2 — Hand out flyers
 

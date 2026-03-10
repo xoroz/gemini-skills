@@ -27,12 +27,6 @@ uv.lock
 # ── Generated sites (output of create.sh / API) ───────────────────────────────
 sites/
 
-# ── Test artefacts ────────────────────────────────────────────────────────────
-test_shot.png
-*.png
-!skills/**/*.png
-!.skel/**/*.png
-!assets/template-flyer.png
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
