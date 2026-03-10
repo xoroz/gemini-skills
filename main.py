@@ -1,4 +1,5 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 import re
@@ -1021,3 +1022,45 @@ async def assign_site(data: AssignSiteData):
     except Exception as e:
         logger.error(f"🔥 [ASSIGN] Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# 7. REDIRECT DIRECT SITE IDs (e.g. 00A.html)
+# ==========================================
+
+@app.get("/{filename}", tags=["redirect"])
+async def redirect_site(filename: str):
+    """
+    Redirects https://dev.texngo.it/00A.html to the generated site url dynamically.
+    Checks the registry for the given ID.
+    """
+    import re
+    if not re.match(r"^[A-Z0-9]{3}\.html$", filename, re.IGNORECASE):
+        raise HTTPException(status_code=404, detail="Not found")
+        
+    site_id = filename[:3].upper()
+    
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), "scripts"))
+    try:
+        import id_manager
+    except ImportError:
+        logger.error("❌ [REDIRECT] Failed to load id_manager module")
+        raise HTTPException(status_code=500, detail="Internal configuration error")
+        
+    registry = id_manager._load_registry()
+    for entry in registry:
+        if entry.get("id", "").upper() == site_id:
+            target_url = entry.get("url")
+            if target_url:
+                # If target_url is relative, we prepend REMOTE_SITE_URL
+                if target_url.startswith("http"):
+                    return RedirectResponse(url=target_url, status_code=302)
+                else:
+                    base = REMOTE_SITE_URL or "https://dev.texngo.it"
+                    return RedirectResponse(url=f"{base.rstrip('/')}/{target_url}", status_code=302)
+            else:
+                # Placeholder, not assigned yet or waiting for generation
+                raise HTTPException(status_code=404, detail=f"Site {site_id} is reserved but not active yet.")
+                
+    raise HTTPException(status_code=404, detail=f"Site ID {site_id} not found.")
