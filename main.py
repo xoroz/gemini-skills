@@ -1,5 +1,5 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 import re
@@ -1053,12 +1053,82 @@ async def redirect_site(filename: str):
         if entry.get("id", "").upper() == site_id:
             target_url = entry.get("url")
             if target_url:
-                # If target_url is relative, we prepend REMOTE_SITE_URL
-                if target_url.startswith("http"):
-                    return RedirectResponse(url=target_url, status_code=302)
-                else:
+                if not target_url.startswith("http"):
                     base = REMOTE_SITE_URL or "https://dev.texngo.it"
-                    return RedirectResponse(url=f"{base.rstrip('/')}/{target_url}", status_code=302)
+                    target_url = f"{base.rstrip('/')}/{target_url}"
+                
+                business_name = entry.get("business_name", "Local Business")
+                encoded_name = urllib.parse.quote(business_name)
+                
+                html_content = f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview → {business_name}</title>
+<style>
+  *, *::before, *::after {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  html, body {{ height: 100%; }}
+  body {{ display: flex; flex-direction: column; font-family: system-ui, sans-serif; background: #0f0f0f; }}
+
+  /* ── Claim bar ── */
+  .claim-bar {{
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 20px;
+    background: #111827;
+    border-bottom: 1px solid #1f2937;
+  }}
+  .claim-bar .label {{
+    font-size: 13px;
+    color: #9ca3af;
+    line-height: 1.4;
+  }}
+  .claim-bar .label strong {{ color: #f3f4f6; }}
+  .claim-bar a.cta {{
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 9px 20px;
+    border-radius: 8px;
+    text-decoration: none;
+    box-shadow: 0 2px 12px rgba(249,115,22,.4);
+    transition: transform .15s, box-shadow .15s;
+  }}
+  .claim-bar a.cta:hover {{
+    transform: translateY(-1px);
+    box-shadow: 0 4px 18px rgba(249,115,22,.55);
+  }}
+  .claim-bar a.cta svg {{ width: 15px; height: 15px; fill: currentColor; }}
+
+  /* ── Site iframe ── */
+  iframe {{
+    flex: 1;
+    width: 100%;
+    border: none;
+    display: block;
+  }}
+</style>
+</head>
+<body>
+  <div class="claim-bar">
+    <p class="label">⏳ &nbsp;Questo sito generato con AI per <strong>{business_name}</strong> è riservato per <strong>48 ore</strong>. Clicca <em>Richiedi</em> per evitare la scadenza del link.</p>
+    <a class="cta" href="https://texngo.it/?name={encoded_name}&message=S%C3%AC%2C+voglio+il+mio+sito+fatto+da+voi%21&focus=email#contact" target="_blank" rel="noopener">
+      🚀 Richiedi il Sito
+    </a>
+  </div>
+  <iframe src="{target_url}" title="{business_name} preview"></iframe>
+</body>
+</html>"""
+                return HTMLResponse(content=html_content)
             else:
                 # Placeholder, not assigned yet or waiting for generation
                 raise HTTPException(status_code=404, detail=f"Site {site_id} is reserved but not active yet.")
