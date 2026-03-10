@@ -421,6 +421,19 @@ if [ "$IMAGES_FAILED" -gt 0 ]; then
   exit 1
 fi
 
+# 5b. OPTIMIZE IMAGES FOR WEB (PNG → WebP)
+OPTIMIZE_SCRIPT="$SCRIPT_DIR/scripts/optimize_images.py"
+if [ -f "$OPTIMIZE_SCRIPT" ] && [ "$MODE" != "MOCKUP" ]; then
+  echo "🗜️  Optimizing images for web (PNG → WebP)..."
+  uv run "$OPTIMIZE_SCRIPT" \
+    --input "$FOLDER_NAME/assets/" \
+    --quality 82 \
+    --max-width 1200 \
+    --max-height 900 \
+    --replace 2>&1 | sed 's/^/   /'
+  echo ""
+fi
+
 
 # 6. GENERATE HTML
 PROMPT="
@@ -451,13 +464,13 @@ The images are ALREADY PRE-GENERATED and sitting in the assets/ folder. Do NOT t
 - ALL images MUST use LOCAL relative paths from the assets/ folder.
 - NEVER use external URLs (no unsplash.com, no placeholder services, no external CDNs for images).
 - These exact files already exist and are ready to use:
-  - assets/hero.png (use for the hero section)
-  - assets/gallery-1.png (use for gallery/portfolio)
-  - assets/gallery-2.png (use for gallery/portfolio)
-  - assets/workshop.png (use for about/workspace section)
-  - assets/detail.png (use for detail/feature sections)
-  - assets/process.png (use for process/how-it-works section)
-- Use with relative paths: src=\"assets/hero.png\"
+  - assets/hero.webp (use for the hero section)
+  - assets/gallery-1.webp (use for gallery/portfolio)
+  - assets/gallery-2.webp (use for gallery/portfolio)
+  - assets/workshop.webp (use for about/workspace section)
+  - assets/detail.webp (use for detail/feature sections)
+  - assets/process.webp (use for process/how-it-works section)
+- Use with relative paths: src=\"assets/hero.webp\"
 - Add descriptive alt text to every image.
 - Use ALL 6 images in the HTML. Do not skip any.
 
@@ -914,12 +927,12 @@ echo "════════════════════════�
 echo ""
 echo "  📁 $FOLDER_NAME/"
 echo "  ├── assets/"
-echo "  │   ├── detail.png"
-echo "  │   ├── gallery-1.png"
-echo "  │   ├── gallery-2.png"
-echo "  │   ├── hero.png"
-echo "  │   ├── process.png"
-echo "  │   ├── workshop.png"
+echo "  │   ├── detail.webp"
+echo "  │   ├── gallery-1.webp"
+echo "  │   ├── gallery-2.webp"
+echo "  │   ├── hero.webp"
+echo "  │   ├── process.webp"
+echo "  │   ├── workshop.webp"
 echo "  │   ├── ${FLYER_NAME}.png"
 echo "  │   └── ${FLYER_NAME}.tiff"
 echo "  ├── index.html"

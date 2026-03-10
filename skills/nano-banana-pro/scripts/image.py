@@ -234,11 +234,42 @@ def generate_with_openrouter(
         return False
 
 
+def convert_to_webp(
+    input_path: str, webp_quality: int = 82, max_width: int = 1200,
+    max_height: int = 900, replace: bool = True,
+) -> str | None:
+    """Convert an image to optimized WebP for web delivery."""
+    try:
+        img = Image.open(input_path)
+        orig_size = os.path.getsize(input_path)
+
+        # Resize if too large (preserve aspect ratio)
+        if img.size[0] > max_width or img.size[1] > max_height:
+            img.thumbnail((max_width, max_height), Image.LANCZOS)
+
+        # Output path: same name but .webp extension
+        webp_path = os.path.splitext(input_path)[0] + ".webp"
+        img.save(webp_path, "WEBP", quality=webp_quality, method=4)
+        webp_size = os.path.getsize(webp_path)
+
+        savings_pct = ((orig_size - webp_size) / orig_size) * 100 if orig_size > 0 else 0
+        print(f"  [web] {os.path.basename(input_path)} → {os.path.basename(webp_path)}")
+        print(f"         {orig_size/1024:.0f}KB → {webp_size/1024:.0f}KB ({savings_pct:.0f}% saved)")
+
+        if replace:
+            os.unlink(input_path)
+
+        return webp_path
+    except Exception as e:
+        print(f"  [web] Warning: WebP conversion failed: {e}", file=sys.stderr)
+        return None
+
+
 def generate_image(
     prompt: str, output_path: str, aspect: str = "square",
     quality: str = "high", reference: str | None = None,
     provider: str = "auto", model: str = DEFAULT_OPENROUTER_MODEL,
-    size: str = "1K",
+    size: str = "1K", web: bool = False,
 ) -> None:
     """Generate image — OpenRouter first by default (more reliable than Gemini API)."""
     output_dir = os.path.dirname(output_path)
@@ -257,6 +288,9 @@ def generate_image(
         else:
             success = generate_with_gemini(prompt, output_path, aspect, quality, reference)
         if success:
+            # Auto-convert to WebP if --web flag is set
+            if web and os.path.exists(output_path):
+                convert_to_webp(output_path, replace=True)
             return
 
     print("Error: All providers failed to generate image.", file=sys.stderr)
@@ -307,11 +341,17 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Auto-convert output to optimized WebP for web delivery (replaces original)",
+    )
+
     args = parser.parse_args()
     generate_image(
         args.prompt, args.output, args.aspect,
         args.quality, args.reference, args.provider, args.model,
-        args.size,
+        args.size, args.web,
     )
 
 
