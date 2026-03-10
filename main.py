@@ -1053,22 +1053,48 @@ async def redirect_site(filename: str):
         if entry.get("id", "").upper() == site_id:
             base = REMOTE_SITE_URL or "https://dev.texngo.it"
             slug = entry.get("slug", "")
+            business_name = entry.get("business_name", "")
             
             # Build the iframe URL: always point to the actual site, NEVER to url_id
             # (url_id is this same page → infinite recursion!)
             target_url = entry.get("url", "")
+            
+            # If registry is stale (slug still reserved, url empty), try the static HTML file on disk
+            if (not target_url or slug.startswith("reserved-")) and os.path.isfile(f"sites/{site_id}.html"):
+                try:
+                    with open(f"sites/{site_id}.html", "r") as f:
+                        static_html = f.read()
+                    # Extract iframe src from static file (e.g. src="panetteria-stefania/index.html")
+                    import re as _re
+                    iframe_match = _re.search(r'iframe\s+src="([^"]+)"', static_html)
+                    if iframe_match:
+                        iframe_src = iframe_match.group(1)
+                        # Make it absolute
+                        if not iframe_src.startswith("http"):
+                            target_url = f"{base.rstrip('/')}/{iframe_src}"
+                        else:
+                            target_url = iframe_src
+                        # Also extract business name from <strong> in claim-bar
+                        name_match = _re.search(r'per\s+<strong>([^<]+)</strong>', static_html)
+                        if name_match:
+                            business_name = name_match.group(1)
+                        # Extract slug from iframe src
+                        slug_match = _re.match(r'([^/]+)/', iframe_src)
+                        if slug_match:
+                            slug = slug_match.group(1)
+                    logger.info(f"📄 [REDIRECT] Used static fallback for {site_id}: {target_url}")
+                except Exception as e:
+                    logger.warning(f"⚠️ [REDIRECT] Failed to read static {site_id}.html: {e}")
+            
             if not target_url and slug and not slug.startswith("reserved-"):
                 # URL not set yet but slug is real → build it
                 target_url = f"{base.rstrip('/')}/{slug}/index.html"
-            elif not target_url:
-                # Truly unassigned placeholder → point to a coming-soon page
-                target_url = ""
+            
             # Make relative URLs absolute
             if target_url and not target_url.startswith("http"):
                 target_url = f"{base.rstrip('/')}/{target_url}"
             
             # Business name: use actual name from registry
-            business_name = entry.get("business_name", "")
             if not business_name or business_name.startswith("(reserved"):
                 # Try to derive a readable name from the slug
                 if slug and not slug.startswith("reserved-"):
