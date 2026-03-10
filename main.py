@@ -116,6 +116,7 @@ app = FastAPI(
     title="Review Site Factory & Scraper API",
     description=_description,
     version="1.0.0",
+    root_path=os.environ.get("OPENAPI_ROOT_PATH", "/api"), # Needed for proxy routing
     contact={
         "name": "Auto-Sites",
         "url": "https://github.com/xoroz/gemini-skills",
