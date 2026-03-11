@@ -116,7 +116,44 @@ Print spec: A5, 300 DPI, CMYK, FOGRA39L ICC, 1819×2551 px.
 
 ---
 
-## Gemini CLI Skills
+## Skills
+
+This repo provides two AI skills used by `create.sh`:
+
+### Nano Banana Pro (Image Generation)
+
+Generate images using OpenRouter or Google GenAI.
+
+```bash
+uv run skills/nano-banana-pro/scripts/image.py \
+  --prompt "Your image description" \
+  --output "/path/to/output.png" \
+  --aspect landscape \
+  --quality draft \
+  --web  # auto-convert to optimized WebP
+```
+
+### Frontend Design
+
+Skill instructions for generating landing pages. See `skills/frontend-design/SKILL.md` for the full design blueprint used when generating HTML/CSS.
+
+### Text Engine
+
+`create.sh` supports two text generation engines:
+
+```bash
+# Default: Claude (sonnet)
+./create.sh "Business" "niche" "address" "contact"
+
+# Use Gemini instead
+TEXT_ENGINE=gemini ./create.sh "Business" "niche" "address" "contact"
+
+# Override model
+TEXT_ENGINE=claude AI_MODEL_TEXT=opus ./create.sh ...
+TEXT_ENGINE=gemini AI_MODEL_TEXT=gemini-3-flash-preview ./create.sh ...
+```
+
+### Gemini CLI Extension
 
 | Skill | Triggers |
 |-------|---------|

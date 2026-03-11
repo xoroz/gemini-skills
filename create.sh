@@ -168,15 +168,26 @@ else
   IMG_COST_EACH=0
 fi
 
-if [ "$MODE" = "MOCKUP" ]; then
-  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash-lite}"
-elif [ "$MODE" = "DEV" ]; then
-  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash}"
-elif [ "$MODE" = "PROD" ]; then
-  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-3-flash-preview}"
+# =============================================================================
+# TEXT ENGINE: claude (default) or gemini
+# Override via env: TEXT_ENGINE=gemini ./create.sh ...
+# =============================================================================
+TEXT_ENGINE="${TEXT_ENGINE:-claude}"  # claude or gemini
+
+if [ "$TEXT_ENGINE" = "claude" ]; then
+  TEXT_MODEL="${AI_MODEL_TEXT:-sonnet}"
 else
-  # SUPER
-  TEXT_MODEL="${AI_MODEL_TEXT:-gemini-3.1-pro-preview}"
+  # Gemini models
+  if [ "$MODE" = "MOCKUP" ]; then
+    TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash-lite}"
+  elif [ "$MODE" = "DEV" ]; then
+    TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash}"
+  elif [ "$MODE" = "PROD" ]; then
+    TEXT_MODEL="${AI_MODEL_TEXT:-gemini-3-flash-preview}"
+  else
+    # SUPER
+    TEXT_MODEL="${AI_MODEL_TEXT:-gemini-3.1-pro-preview}"
+  fi
 fi
 # =============================================================================
 
@@ -279,6 +290,7 @@ echo "  🏷️  Niche:    $NICHE"
 echo "  📍 Address:  $ADDRESS"
 echo "  📞 Contact:  $CONTACT"
 echo "  🌐 Language: $LANG_NAME ($SITE_LANG)"
+echo "  🤖 Text:     $TEXT_ENGINE ($TEXT_MODEL)"
 echo "  📁 Output:   $FOLDER_NAME/"
 echo ""
 echo "  ⏱️  Started:  $(date '+%Y-%m-%d %H:%M:%S')"
@@ -515,8 +527,8 @@ Do NOT output anything after the closing </html> tag.
 "
 
 # Function to generate text with retry logic
+# - Supports both Claude CLI and Gemini CLI (controlled by TEXT_ENGINE)
 # - Detects truncated HTML (model hit output token limit) and retries
-# - Falls back to DEV model (gemini-2.5-flash) on retry 2
 # - Max 2 retries (3 total attempts)
 generate_text_with_retry() {
   local prompt="$1"
@@ -525,25 +537,52 @@ generate_text_with_retry() {
   local max_retries=2
   local retry=0
   local success=false
-  local fallback_model="gemini-2.5-flash"  # cheaper/faster, different token capacity
+
+  # Fallback models for retry 2
+  local fallback_model
+  if [ "$TEXT_ENGINE" = "claude" ]; then
+    fallback_model="haiku"
+  else
+    fallback_model="gemini-2.5-flash"
+  fi
+
+  # Verify the CLI is installed
+  if [ "$TEXT_ENGINE" = "claude" ]; then
+    if ! command -v claude &> /dev/null; then
+      echo "❌ Error: claude command not found in PATH."
+      return 1
+    fi
+  else
+    if ! command -v gemini &> /dev/null; then
+      echo "❌ Error: gemini command not found in PATH."
+      return 1
+    fi
+  fi
 
   while [ $retry -le $max_retries ]; do
     local err_file
     err_file=$(mktemp)
 
-    if ! command -v gemini &> /dev/null; then
-      echo "❌ Error: gemini command not found in PATH." > "$err_file"
-      return 1
-    fi
-
-    # On retry 2: fall back to a different model (avoids hitting the same limit)
+    # On retry 2: fall back to a cheaper model
     local use_model="$TEXT_MODEL"
     if [ $retry -ge 2 ]; then
       use_model="$fallback_model"
-      echo "     🔄 Falling back to $use_model for retry $retry..."
+      echo "     🔄 Falling back to $use_model ($TEXT_ENGINE) for retry $retry..."
     fi
 
-    if echo "$prompt" | gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
+    # Dispatch to the correct CLI
+    local cmd_ok=false
+    if [ "$TEXT_ENGINE" = "claude" ]; then
+      if echo "$prompt" | claude -p --model "$use_model" > "$output_file" 2> "$err_file"; then
+        cmd_ok=true
+      fi
+    else
+      if echo "$prompt" | gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
+        cmd_ok=true
+      fi
+    fi
+
+    if [ "$cmd_ok" = true ]; then
       # Exit code 0 — check if we actually got useful output
       if [ -s "$output_file" ]; then
         # For HTML generation: check for truncation (model hit output token limit)
@@ -551,7 +590,7 @@ generate_text_with_retry() {
           local trunc_size
           trunc_size=$(wc -c < "$output_file" 2>/dev/null || echo 0)
           echo "     ⚠️  ${label}: Output truncated ($(numfmt --to=iec $trunc_size 2>/dev/null || echo ${trunc_size}B), no </html>). Will retry."
-          echo "[WARN] Truncated HTML on attempt $((retry+1)) with model $use_model" >> "$LOG_FILE"
+          echo "[WARN] Truncated HTML on attempt $((retry+1)) with $TEXT_ENGINE/$use_model" >> "$LOG_FILE"
           # Fall through to retry logic
         else
           success=true
@@ -570,19 +609,19 @@ generate_text_with_retry() {
 
     retry=$((retry + 1))
     if [ $retry -gt $max_retries ]; then
-        echo "     ❌ ${label}: Failed after $max_retries retries."
+        echo "     ❌ ${label}: Failed after $max_retries retries ($TEXT_ENGINE)."
         echo "Error details: $err_content" >> "$LOG_FILE"
         return 1
     fi
 
     # Check for quota/rate limit errors
-    if echo "$err_content" | grep -q "MODEL_CAPACITY_EXHAUSTED\|429\|RESOURCE_EXHAUSTED"; then
+    if echo "$err_content" | grep -q "MODEL_CAPACITY_EXHAUSTED\|429\|RESOURCE_EXHAUSTED\|rate_limit\|overloaded"; then
         local wait=$((45 * retry))  # 45s, 90s
         echo "     ⏳ ${label}: Rate limited. Waiting ${wait}s before retry $retry/$max_retries..."
         sleep $wait
     else
         echo "     ⚠️  ${label}: Error encountered. Retrying in 10s... ($retry/$max_retries)"
-        echo "[WARN] Retry $retry for $label: $err_content" >> "$LOG_FILE"
+        echo "[WARN] Retry $retry for $label ($TEXT_ENGINE): $err_content" >> "$LOG_FILE"
         sleep 10
     fi
   done
