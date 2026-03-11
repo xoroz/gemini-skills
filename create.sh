@@ -475,25 +475,38 @@ The images are ALREADY PRE-GENERATED and sitting in the assets/ folder. Do NOT t
 - Use ALL 6 images in the HTML. Do not skip any.
 
 DESIGN REQUIREMENTS:
-- Choose distinctive typography (Google Fonts, not generic fonts).
-- Create a cohesive color palette fitting the $NICHE industry.
-- Add smooth animations and micro-interactions.
-- Make it fully responsive with mobile breakpoints.
-- Use CSS variables for the color system.
-- The nav/header must use flexbox: logo left, links center, CTA button right — all on one horizontal line.
-- Include hover effects, transitions, and scroll-based animations.
+- Choose distinctive typography (Google Fonts, not Inter/Roboto/Arial).
+- Create a cohesive color palette fitting the $NICHE industry using CSS variables.
+- Make it fully responsive with a mobile breakpoint at 768px.
+- The nav/header MUST use flexbox: logo left, links center, CTA right.
+- MUST include a working hamburger menu for mobile using a checkbox toggle pattern.
+- Include hover effects and transitions on buttons, cards, and nav links.
+- NEVER reference images that don't exist (no logo.png, no dummy.png, no avatar images).
+  For testimonials, use Font Awesome quote icons and text only — no customer photos.
+- Do NOT duplicate any section. Each of the 9 sections appears exactly ONCE.
+
+SCROLL ANIMATIONS - REQUIRED:
+Include this JavaScript in a <script> tag before </body>:
+- IntersectionObserver-based scroll reveal (add class=\"reveal\" to each <section>)
+- Sticky header shadow toggle on scroll
+- Smooth scroll for anchor links
+Do NOT link to external .js files. All JS goes inline.
+
+INLINE STYLE BAN:
+- NEVER use style=\"...\" attributes in HTML elements. ALL styling goes in style.css.
 
 JAVASCRIPT RULE:
 - NEVER use 'window' as a variable name in forEach, map, or any callback. Use 'el' or 'element'. Example: elements.forEach(el => { ... })
 
 CDN LINKS RULE:
 - When linking external resources (Font Awesome, Google Fonts, etc.), do NOT add integrity= or crossorigin= attributes. Just use a simple <link> tag with rel and href.
-- Example: <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+- Example: <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\">
 
 OUTPUT FORMAT - CRITICAL:
 Your VERY FIRST character of output MUST be '<' (the start of <!DOCTYPE html>).
-Do NOT output any explanation, commentary, thinking, or preamble before the code.
+Do NOT output any explanation, commentary, thinking, font choices, color palettes, or preamble before the code.
 Do NOT say what you are going to do. Just output the raw HTML directly.
+Do NOT output anything after the closing </html> tag.
 - Output ONLY the raw HTML5 content for index.html.
 - Do NOT include any CSS in the HTML file. No <style> tags at all.
 - All styling will go in a separate file. Link it with: <link rel=\"stylesheet\" href=\"style.css\">
