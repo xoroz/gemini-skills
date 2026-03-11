@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Usage: ./create.sh "Business Name" "Niche" "Address" "Contact Info"
+# Usage: ./create.sh [--website <url>] "Business Name" "Niche" "Address" "Contact Info"
+#        --website <url>  Scrape the URL and use real data (frontend-clone mode)
 # Language: Set SITE_LANG=en before running to generate in English (default: it)
 # Mode:     Set MODE=DEV|PROD|SUPER|MOCKUP before running (default: DEV)
 #
@@ -16,8 +17,29 @@
 #   MODE=DEV ./create.sh "Test Salon" "parrucchiere" "Via Test 1" "+39 000"
 #   MODE=PROD ./create.sh "Ristorante Bella" "ristorante" "Via Po 1, Roma" "+39 06 9999"
 #   MODE=SUPER ./create.sh "Hotel Lusso" "luxury hotel" "Piazza Navona 1" "+39 06 1111"
+#   ./create.sh --website https://example.com "Agenzia Viaggi" "turismo" "Via Roma 1" "+39 0585 123"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- PARSE OPTIONAL FLAGS (before positional args) ---
+# Supports both:  --website <url>   (CLI)
+#                 WEBSITE_URL=<url> (env, used by FastAPI)
+WEBSITE_URL="${WEBSITE_URL:-}"
+
+_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --website)
+      WEBSITE_URL="$2"
+      shift 2
+      ;;
+    *)
+      _args+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${_args[@]}"
 
 # --- 0. ENV & PATH SETUP ---
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:$PATH"
@@ -93,7 +115,6 @@ send_build_summary() {
     💰 Cost     : \$${TOTAL_COST:-"N/A"}
     📁 Assets   : $assets_sz_str
     
-    🖨️ Flyer    : assets/flyers/${FLYER_NAME:-"N/A"}
     ═══════════════════════════════════════════════
     Build log:
     ${log_content}
@@ -292,6 +313,9 @@ echo "  📞 Contact:  $CONTACT"
 echo "  🌐 Language: $LANG_NAME ($SITE_LANG)"
 echo "  🤖 Text:     $TEXT_ENGINE ($TEXT_MODEL)"
 echo "  📁 Output:   $FOLDER_NAME/"
+if [ -n "$WEBSITE_URL" ]; then
+echo "  🔍 Clone:    $WEBSITE_URL"
+fi
 echo ""
 echo "  ⏱️  Started:  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "═══════════════════════════════════════════════════"
@@ -447,9 +471,74 @@ if [ -f "$OPTIMIZE_SCRIPT" ] && [ "$MODE" != "MOCKUP" ]; then
 fi
 
 
+# 6a. SCRAPE SOURCE WEBSITE (if --website / WEBSITE_URL provided)
+SCRAPED_DATA=""
+SCRAPE_SKILL_SECTION=""
+if [ -n "$WEBSITE_URL" ]; then
+  SCRAPE_SCRIPT="$SCRIPT_DIR/scripts/scrape_site.py"
+  PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
+  if [ ! -f "$PYTHON_BIN" ]; then PYTHON_BIN="python3"; fi
+
+  if [ -f "$SCRAPE_SCRIPT" ]; then
+    echo "🔍 Scraping source website: $WEBSITE_URL"
+    SCRAPE_OUT=$("$PYTHON_BIN" "$SCRAPE_SCRIPT" "$WEBSITE_URL" 2>&1)
+    SCRAPE_EXIT=$?
+    echo "$SCRAPE_OUT" | sed 's/^/   /'
+
+    # Locate the raw.md file that was written
+    SCRAPE_DOMAIN=$(python3 -c "
+import re, sys
+from urllib.parse import urlparse
+u = sys.argv[1]
+if not u.startswith('http'): u = 'https://' + u
+domain = urlparse(u).netloc or u
+print(re.sub(r'[^a-z0-9.-]', '-', domain.lower()).strip('-'))
+" "$WEBSITE_URL" 2>/dev/null)
+    SCRAPE_MD="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/raw.md"
+
+    if [ $SCRAPE_EXIT -eq 0 ] && [ -f "$SCRAPE_MD" ]; then
+      SCRAPED_DATA=$(cat "$SCRAPE_MD")
+      echo "✅ Scrape complete — loaded: scrapes/${SCRAPE_DOMAIN}/raw.md"
+      SCRAPE_SKILL_SECTION="
+## REAL BUSINESS DATA (scraped from $WEBSITE_URL)
+
+The following data was automatically extracted from the client's existing website.
+Use it to populate ALL sections of the page with accurate, real content.
+Do NOT invent placeholder text where real data is available.
+
+\`\`\`
+$SCRAPED_DATA
+\`\`\`
+
+DATA USAGE RULES:
+- Business name, tagline, nav structure → from scraped data
+- Services/offerings → from scraped services list (or raw_text_sections if services is empty)
+- About section → from scraped about text
+- Contact info → use scraped address, phone, email exactly
+- Social links → use scraped URLs verbatim
+- Brand colors → base CSS palette on detected colors when available
+- Brand font → if a font was detected, use it or a harmonious companion via Google Fonts
+- Testimonials → from scraped testimonials (if any)
+- Image alt text → reference scraped image descriptions for meaningful alt attributes
+- NEVER hotlink scraped image URLs — use only the local assets/ files as always
+"
+    else
+      echo "⚠️  Scrape failed or raw.md not found — continuing without scraped data"
+    fi
+  else
+    echo "⚠️  Scrape script not found at $SCRAPE_SCRIPT — skipping"
+  fi
+  echo ""
+fi
+
 # 6. GENERATE HTML
+SKILL_INSTRUCTION="frontend-design skill"
+if [ -n "$WEBSITE_URL" ] && [ -n "$SCRAPED_DATA" ]; then
+  SKILL_INSTRUCTION="frontend-clone skill (which extends frontend-design with real scraped data)"
+fi
+
 PROMPT="
-You are an expert web designer using the frontend-design skill.
+You are an expert web designer using the ${SKILL_INSTRUCTION}.
 PROJECT: Create a high-converting landing page for a local business.
 
 LANGUAGE - CRITICAL:
@@ -460,10 +549,10 @@ BUSINESS DETAILS:
 - Niche: $NICHE
 - Address: $ADDRESS
 - Contact: $CONTACT
-
+$SCRAPE_SKILL_SECTION
 DESIGN INSTRUCTIONS:
-Create a landing page design for a local $NICHE company. 
-Use the frontend-design skill to ensure distinctive, production-grade aesthetics.
+Create a landing page design for a local $NICHE company.
+Use the ${SKILL_INSTRUCTION} to ensure distinctive, production-grade aesthetics.
 Use typography and design style that works for this niche. 
 Use icons from Font Awesome (CDN) instead of using emoji.
 Include JavaScript for scroll animations, reveal effects, and interactivity.
@@ -877,60 +966,6 @@ else
 fi
 echo ""
 
-# 9. GENERATE FLYER
-MAKE_FLYER_SCRIPT="$SCRIPT_DIR/scripts/make_flyer.py"
-# Prefer 300 DPI template; fall back to legacy if not available yet
-if [ -f "$SCRIPT_DIR/assets/template-flyer-300dpi.png" ]; then
-  FLYER_TEMPLATE="$SCRIPT_DIR/assets/template-flyer-300dpi.png"
-else
-  FLYER_TEMPLATE="$SCRIPT_DIR/assets/template-flyer.png"
-fi
-FLYER_NAME="flyer-${SITE_ID:-${SITE_SLUG}}"
-FLYER_ASSETS_DIR="$SCRIPT_DIR/assets/flyers"
-FLYER_ASSETS_OUT="$FLYER_ASSETS_DIR/$FLYER_NAME"
-FLYER_SITE_OUT="$SCRIPT_DIR/$FOLDER_NAME/assets/$FLYER_NAME"
-
-# Build the QR URL — use URLID (short redirect) if available, fall back to slug
-if [ -n "$SITE_URLID" ]; then
-  FLYER_QR_URL="$SITE_URLID"
-elif [ -n "$REMOTE_SITE_URL" ]; then
-  FLYER_QR_URL="$REMOTE_SITE_URL/$SITE_SLUG"
-else
-  FLYER_QR_URL="https://${SITE_SLUG}.texngo.it"
-fi
-
-echo "📄 Generating flyer..."
-echo "   QR URL : $FLYER_QR_URL"
-
-mkdir -p "$FLYER_ASSETS_DIR"
-
-FLYER_ID_ARGS=()
-if [ -n "$SITE_ID" ]; then
-  FLYER_ID_ARGS=("--site-id" "$SITE_ID")
-fi
-
-if [ -f "$MAKE_FLYER_SCRIPT" ] && [ -f "$FLYER_TEMPLATE" ]; then
-  if uv run "$MAKE_FLYER_SCRIPT" \
-      --name     "$BUSINESS_NAME" \
-      --url      "$FLYER_QR_URL" \
-      --template "$FLYER_TEMPLATE" \
-      --output   "$FLYER_ASSETS_OUT" \
-      --format   both \
-      "${FLYER_ID_ARGS[@]}" 2>&1 | sed 's/^/   /'; then
-    # TIFF (print) stays in assets/flyers/, PNG (preview) goes to site assets
-    [ -f "${FLYER_ASSETS_OUT}.png" ] && cp "${FLYER_ASSETS_OUT}.png" "${FLYER_SITE_OUT}.png"
-    echo "   📋 TIFF (print) → assets/flyers/${FLYER_NAME}.tiff"
-    echo "   📋 PNG (preview) → $FOLDER_NAME/assets/${FLYER_NAME}.png"
-    echo "✅ Flyer ready!"
-  else
-    echo "⚠️  Flyer generation failed — site is still complete."
-  fi
-else
-  [ ! -f "$MAKE_FLYER_SCRIPT" ] && echo "⚠️  Skipping flyer: make_flyer.py not found"
-  [ ! -f "$FLYER_TEMPLATE" ]    && echo "⚠️  Skipping flyer: template-flyer.png not found"
-fi
-echo ""
-
 # 9. CALCULATE STATS
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
@@ -994,14 +1029,10 @@ echo "  │   ├── gallery-1.webp"
 echo "  │   ├── gallery-2.webp"
 echo "  │   ├── hero.webp"
 echo "  │   ├── process.webp"
-echo "  │   ├── workshop.webp"
-echo "  │   ├── ${FLYER_NAME}.png"
-echo "  │   └── ${FLYER_NAME}.tiff"
+echo "  │   └── workshop.webp"
 echo "  ├── index.html"
 echo "  ├── style.css"
 echo "  └── build.log"
-echo ""
-echo "  🖨️  Flyer (global): assets/flyers/${FLYER_NAME}.{png,tiff}"
 echo ""
 echo "  📋 Full log: $LOG_FILE"
 echo ""

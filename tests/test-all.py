@@ -32,10 +32,21 @@ CLI args (override env vars):
   --query QUERY             Raw Maps search query (overridden by --business-type + --location)
   --build-wait SECONDS      Max seconds to wait for build (remote: polls site URL)
   --webhook-url URL         Webhook URL passed to /generate-site
+  --website URL             Scrape URL before building (frontend-clone mode)
+  --business-name NAME      Manual business name (skips Maps scrape)
+  --niche TYPE              Manual niche (skips Maps scrape)
+  --address ADDR            Manual address
+  --tel TEL                 Manual phone
 
 Usage examples:
   # Local (default):
   python tests/test-all.py
+
+  # Clone mode — scrape real site, skip Maps:
+  python tests/test-all.py \
+      --website https://www.lacabanaviaggi.com/ \
+      --business-name "La Cabana Viaggi" --niche "agenzia viaggi" \
+      --address "Via Example 1, Genova" --tel "+39 010 123456"
 
   # Remote — API on :8080, sites served by nginx on :80
   python tests/test-all.py --remote --host 192.168.0.114 --port 8080
@@ -104,6 +115,14 @@ def _parse_args() -> argparse.Namespace:
         help="Raw Maps search query (overridden by --business-type + --location)")
     parser.add_argument("--build-wait", metavar="SECONDS",type=int, help="Max build wait in seconds")
     parser.add_argument("--webhook-url",metavar="URL",    help="Webhook URL for /generate-site")
+    # frontend-clone mode
+    parser.add_argument("--website",     metavar="URL",
+        help="Scrape this URL before generating (frontend-clone mode). "
+             "Combine with --business-name/--niche/--address/--tel to skip Maps scrape.")
+    parser.add_argument("--business-name", metavar="NAME", help="Override business name (skips Maps scrape)")
+    parser.add_argument("--niche",         metavar="TYPE", help="Override niche (skips Maps scrape)")
+    parser.add_argument("--address",       metavar="ADDR", help="Override address (skips Maps scrape)")
+    parser.add_argument("--tel",           metavar="TEL",  help="Override phone (skips Maps scrape)")
     return parser.parse_args()
 
 
@@ -157,6 +176,18 @@ else:
 API_TOKEN = os.environ.get("API_TOKEN", "")
 AUTH_HEADERS = {"Authorization": f"Bearer {API_TOKEN}"} if API_TOKEN else {}
 SITE_LANG = os.environ.get("SITE_LANG", "it")
+
+# frontend-clone mode
+WEBSITE_CLONE: str = (ARGS.website or "").strip()
+MANUAL_BIZ: dict = {}
+if ARGS.business_name and ARGS.niche:
+    MANUAL_BIZ = {
+        "business_name": ARGS.business_name.strip(),
+        "niche":         ARGS.niche.strip(),
+        "address":       (ARGS.address or "").strip(),
+        "tel":           (ARGS.tel     or "").strip(),
+    }
+SKIP_SCRAPE: bool = bool(MANUAL_BIZ)  # skip Maps scrape when manual data is provided
 
 def _resolve_remote_site_url() -> str:
     """
@@ -348,7 +379,7 @@ def step_scrape_cache_and_qty():
     else:
         base_params = {"query": QUERY}
 
-    def _scrape(n: int, label: str) -> tuple[list, float]:
+    def _scrape(n: int, label: str):
         params = {**base_params, "max_results": n}
         t0 = time.monotonic()
         try:
@@ -426,6 +457,8 @@ def step_generate(biz: dict) -> str:
     print(f"\n{YELLOW}[Step 3] Trigger site build for \"{name}\"{NC}")
     mode_val = os.environ.get("MODE", "DEV")
     info(f"MODE={mode_val}")
+    if WEBSITE_CLONE:
+        info(f"frontend-clone mode — will scrape: {WEBSITE_CLONE}")
     info("API returns immediately; build runs in background.")
     print()
 
@@ -436,6 +469,8 @@ def step_generate(biz: dict) -> str:
         "tel":           biz.get("tel", ""),
         "webhook_url":   WEBHOOK_URL,
     }
+    if WEBSITE_CLONE:
+        payload["website"] = WEBSITE_CLONE
     print("  Payload:")
     print("  " + json.dumps(payload, indent=2, ensure_ascii=False).replace("\n", "\n  "))
     print()
@@ -877,7 +912,12 @@ def main():
         token_str = f"{API_TOKEN[:4]}...{API_TOKEN[-4:]}" if len(API_TOKEN) > 8 else "NOT SET/EMPTY"
         print(f"   .env    : Loaded (API_TOKEN={token_str})")
     print(f"   API     : {BASE_URL}")
-    print(f"   Query   : {QUERY}")
+    if WEBSITE_CLONE:
+        print(f"   Clone   : {BOLD}{WEBSITE_CLONE}{NC}  (frontend-clone mode)")
+    if SKIP_SCRAPE:
+        print(f"   Business: {MANUAL_BIZ['business_name']} / {MANUAL_BIZ['niche']}")
+    else:
+        print(f"   Query   : {QUERY}")
     mode_val = os.environ.get("MODE", "DEV")
     print(f"   Mode    : {mode_val}")
     if REMOTE:
@@ -892,13 +932,19 @@ def main():
     step_health()
     sep()
 
-    # Step 2: Scrape (always runs — it's just an API call)
-    biz = step_scrape()
+    # Step 2: Scrape — skip if manual business data provided via CLI
+    if SKIP_SCRAPE:
+        print(f"\n{YELLOW}[Step 2] Google Maps scrape{NC}")
+        skip("Skipped — manual --business-name/--niche provided")
+        biz = MANUAL_BIZ
+    else:
+        biz = step_scrape()
     sep()
 
-    # Step 2.5: Quantity cap & cache invalidation regression tests
-    step_scrape_cache_and_qty()
-    sep()
+    # Step 2.5: Quantity cap & cache invalidation regression tests (skip in clone mode)
+    if not SKIP_SCRAPE:
+        step_scrape_cache_and_qty()
+        sep()
 
     # Step 2.6: Test flyer endpoints
     test_flyers_assign()

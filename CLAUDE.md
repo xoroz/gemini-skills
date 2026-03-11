@@ -18,6 +18,10 @@ A mono-repo with two tightly-coupled components:
 - **Python + FastAPI** (`main.py`)
 - Runs as a **systemd service** (`gemini-skills`)
 - Python **venv** required (`source venv/bin/activate`)
+- **Python 3.11** required (prod). Local system default is 3.9 — always create venv with `python3.11 -m venv venv`
+  - Install 3.11 on RHEL 9: `sudo dnf install python3.11 python3.11-devel -y`
+  - Use `typing.Optional`/`typing.List` (not `X | None` or `list[X]`) so code runs on both 3.9 and 3.11
+  - If Nexus proxy (nexus-pro) returns 502, fall back to PyPI: `venv/bin/pip install -r requirements.txt --index-url https://pypi.org/simple/`
 - `uv` used by scripts (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
 
 ---

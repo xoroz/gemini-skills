@@ -13,6 +13,7 @@ import json
 from logging.handlers import RotatingFileHandler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional, List
 
 # ---------------------------------------------------------------------------
 # Setup Logging
@@ -211,6 +212,7 @@ class BusinessData(BaseModel):
     address: str
     tel: str
     webhook_url: str  # For n8n asynchronous callback
+    website: str = ""  # Optional: scrape this URL before generating (frontend-clone mode)
 
 class ModifySiteData(BaseModel):
     site_slug: str
@@ -326,7 +328,7 @@ async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_del
 
 
 
-def _lookup_site_id(slug: str) -> dict | None:
+def _lookup_site_id(slug: str) -> Optional[dict]:
     """Look up a slug in sites/site-id.json and return its entry if found."""
     registry_path = os.path.join("sites", "site-id.json")
     if not os.path.exists(registry_path):
@@ -378,11 +380,17 @@ async def build_site_and_notify(data: BusinessData):
 
         # start_new_session=True puts create.sh in its own process group so we
         # can kill the whole tree (bash → gemini → uv → python …) at once.
+        build_env = {**os.environ}
+        if data.website:
+            build_env["WEBSITE_URL"] = data.website
+            logger.info(f"🔍 [BACKGROUND] frontend-clone mode — will scrape: {data.website}")
+
         process = await asyncio.create_subprocess_exec(
             script_path, data.business_name, data.niche, data.address, data.tel,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            env=build_env,
         )
 
         # Wait for completion with a hard ceiling
@@ -894,7 +902,7 @@ async def modify_site(data: ModifySiteData):
 # 6. FLYER MANAGER
 # ==========================================
 
-async def generate_flyers_bg(current_ids: list[str], remote_url: str):
+async def generate_flyers_bg(current_ids: List[str], remote_url: str):
     """Background task to run make_flyer.py with the new range of IDs."""
     if not current_ids:
         return
