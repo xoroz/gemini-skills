@@ -528,7 +528,8 @@ Do NOT output anything after the closing </html> tag.
 
 # Function to generate text with retry logic
 # - Supports both Claude CLI and Gemini CLI (controlled by TEXT_ENGINE)
-# - Detects truncated HTML (model hit output token limit) and retries
+# - On final retry: switches to the OTHER engine as fallback
+# - Detects truncated HTML and usage limit messages
 # - Max 2 retries (3 total attempts)
 generate_text_with_retry() {
   local prompt="$1"
@@ -538,41 +539,41 @@ generate_text_with_retry() {
   local retry=0
   local success=false
 
-  # Fallback models for retry 2
-  local fallback_model
-  if [ "$TEXT_ENGINE" = "claude" ]; then
-    fallback_model="haiku"
-  else
-    fallback_model="gemini-2.5-flash"
-  fi
-
-  # Verify the CLI is installed
-  if [ "$TEXT_ENGINE" = "claude" ]; then
-    if ! command -v claude &> /dev/null; then
-      echo "❌ Error: claude command not found in PATH."
-      return 1
-    fi
-  else
-    if ! command -v gemini &> /dev/null; then
-      echo "❌ Error: gemini command not found in PATH."
-      return 1
-    fi
-  fi
+  # Track the engine/model per attempt (may switch on fallback)
+  local use_engine="$TEXT_ENGINE"
+  local use_model="$TEXT_MODEL"
 
   while [ $retry -le $max_retries ]; do
     local err_file
     err_file=$(mktemp)
 
-    # On retry 2: fall back to a cheaper model
-    local use_model="$TEXT_MODEL"
+    # On retry 2: switch to the OTHER engine entirely
     if [ $retry -ge 2 ]; then
-      use_model="$fallback_model"
-      echo "     🔄 Falling back to $use_model ($TEXT_ENGINE) for retry $retry..."
+      if [ "$TEXT_ENGINE" = "claude" ]; then
+        use_engine="gemini"
+        use_model="gemini-2.5-flash"
+      else
+        use_engine="claude"
+        use_model="sonnet"
+      fi
+      echo "     🔄 Switching to $use_engine ($use_model) for retry $retry..."
+    fi
+
+    # Verify the CLI is installed
+    if ! command -v "$use_engine" &> /dev/null; then
+      echo "     ❌ $use_engine command not found, cannot retry with fallback engine."
+      if [ $retry -ge 2 ]; then
+        echo "     ❌ ${label}: Failed — primary engine ($TEXT_ENGINE) exhausted, fallback ($use_engine) not installed."
+        return 1
+      fi
+      # Skip to next retry (which will try the other engine)
+      retry=$((retry + 1))
+      continue
     fi
 
     # Dispatch to the correct CLI
     local cmd_ok=false
-    if [ "$TEXT_ENGINE" = "claude" ]; then
+    if [ "$use_engine" = "claude" ]; then
       if echo "$prompt" | claude -p --model "$use_model" > "$output_file" 2> "$err_file"; then
         cmd_ok=true
       fi
@@ -582,22 +583,27 @@ generate_text_with_retry() {
       fi
     fi
 
-    if [ "$cmd_ok" = true ]; then
-      # Exit code 0 — check if we actually got useful output
-      if [ -s "$output_file" ]; then
-        # For HTML generation: check for truncation (model hit output token limit)
-        if [ "$label" = "HTML" ] && ! grep -qi "</html" "$output_file"; then
-          local trunc_size
-          trunc_size=$(wc -c < "$output_file" 2>/dev/null || echo 0)
-          echo "     ⚠️  ${label}: Output truncated ($(numfmt --to=iec $trunc_size 2>/dev/null || echo ${trunc_size}B), no </html>). Will retry."
-          echo "[WARN] Truncated HTML on attempt $((retry+1)) with $TEXT_ENGINE/$use_model" >> "$LOG_FILE"
-          # Fall through to retry logic
-        else
-          success=true
-          rm -f "$err_file"
-          break
-        fi
+    if [ "$cmd_ok" = true ] && [ -s "$output_file" ]; then
+      # Check for usage limit messages in the output itself
+      # (Claude returns exit 0 but writes "You've hit your limit" as content)
+      if grep -qi "hit your limit\|usage limit\|resets.*am\|exceeded.*limit" "$output_file" 2>/dev/null; then
+        echo "     🛑 ${label}: $use_engine returned a usage limit message instead of content."
+        echo "[WARN] Usage limit hit on attempt $((retry+1)) with $use_engine/$use_model" >> "$LOG_FILE"
+        # Fall through to retry (will switch engine on retry 2)
+      # For HTML generation: check for truncation (model hit output token limit)
+      elif [ "$label" = "HTML" ] && ! grep -qi "</html" "$output_file"; then
+        local trunc_size
+        trunc_size=$(wc -c < "$output_file" 2>/dev/null || echo 0)
+        echo "     ⚠️  ${label}: Output truncated ($(numfmt --to=iec $trunc_size 2>/dev/null || echo ${trunc_size}B), no </html>). Will retry."
+        echo "[WARN] Truncated HTML on attempt $((retry+1)) with $use_engine/$use_model" >> "$LOG_FILE"
+        # Fall through to retry
       else
+        success=true
+        rm -f "$err_file"
+        break
+      fi
+    else
+      if [ ! -s "$output_file" ]; then
         echo "Output file was empty (silent failure)" >> "$err_file"
       fi
     fi
@@ -609,19 +615,23 @@ generate_text_with_retry() {
 
     retry=$((retry + 1))
     if [ $retry -gt $max_retries ]; then
-        echo "     ❌ ${label}: Failed after $max_retries retries ($TEXT_ENGINE)."
+        echo "     ❌ ${label}: Failed after $max_retries retries (tried $TEXT_ENGINE + fallback)."
         echo "Error details: $err_content" >> "$LOG_FILE"
         return 1
     fi
 
     # Check for quota/rate limit errors
-    if echo "$err_content" | grep -q "MODEL_CAPACITY_EXHAUSTED\|429\|RESOURCE_EXHAUSTED\|rate_limit\|overloaded"; then
-        local wait=$((45 * retry))  # 45s, 90s
-        echo "     ⏳ ${label}: Rate limited. Waiting ${wait}s before retry $retry/$max_retries..."
-        sleep $wait
+    if echo "$err_content" | grep -qi "MODEL_CAPACITY_EXHAUSTED\|429\|RESOURCE_EXHAUSTED\|rate_limit\|overloaded\|hit your limit\|exceeded.*limit"; then
+        if [ $retry -lt 2 ]; then
+          local wait=$((30 * retry))  # 30s, 60s
+          echo "     ⏳ ${label}: Rate limited ($use_engine). Waiting ${wait}s before retry $retry/$max_retries..."
+          sleep $wait
+        else
+          echo "     ⚠️  ${label}: $use_engine quota exhausted. Switching engine on next retry..."
+        fi
     else
-        echo "     ⚠️  ${label}: Error encountered. Retrying in 10s... ($retry/$max_retries)"
-        echo "[WARN] Retry $retry for $label ($TEXT_ENGINE): $err_content" >> "$LOG_FILE"
+        echo "     ⚠️  ${label}: Error encountered ($use_engine). Retrying in 10s... ($retry/$max_retries)"
+        echo "[WARN] Retry $retry for $label ($use_engine): $err_content" >> "$LOG_FILE"
         sleep 10
     fi
   done
