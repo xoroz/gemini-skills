@@ -324,10 +324,12 @@ def main():
     md_path.write_text(md, encoding="utf-8")
     print(f"Summary saved → {md_path}")
 
-    # Print summary to stdout
+    # Print summary to stdout (truncated to avoid log spam)
     print("\n" + "─" * 60)
-    print(md)
-
+    md_lines = md.splitlines()
+    print("\n".join(md_lines[:15]))
+    if len(md_lines) > 15:
+        print(f"... ({len(md_lines) - 15} more lines truncated. see raw.md for full details)")
 
 def build_markdown(d: dict) -> str:
     lines = [f"# {d['business_name'] or 'Unknown Business'}", ""]

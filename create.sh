@@ -515,7 +515,7 @@ DATA USAGE RULES:
 - Services/offerings → from scraped services list (or raw_text_sections if services is empty)
 - About section → from scraped about text
 - Contact info → use scraped address, phone, email exactly
-- Social links → use scraped URLs verbatim
+- Social links → MUST be placed in the Footer as clickable Font Awesome icons (e.g. facebook, instagram, whatsapp, etc). Use the scraped URLs verbatim. DO NOT use generic '#' links if data is available.
 - Brand colors → base CSS palette on detected colors when available
 - Brand font → if a font was detected, use it or a harmonious companion via Google Fonts
 - Testimonials → from scraped testimonials (if any)
