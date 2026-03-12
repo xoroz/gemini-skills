@@ -613,6 +613,11 @@ Do NOT output anything after the closing </html> tag.
 - All styling will go in a separate file. Link it with: <link rel=\"stylesheet\" href=\"style.css\">
 - Set lang=\"$SITE_LANG\" on the <html> tag.
 - Do not output markdown code blocks. Just raw HTML code.
+
+STRICT SERVER-SIDE ENVIRONMENT RULES:
+- NEVER use bash tools, git, or write to the filesystem directly.
+- NEVER try to push or commit anything to GitHub or any other repository.
+- You must ONLY return the raw text to standard output for the parent script to capture.
 "
 
 # Function to generate text with retry logic
@@ -660,14 +665,15 @@ generate_text_with_retry() {
       continue
     fi
 
-    # Dispatch to the correct CLI
+    # Dispatch to the correct CLI (with a 4-minute absolute timeout to prevent hanging)
     local cmd_ok=false
     if [ "$use_engine" = "claude" ]; then
-      if printf "%s\\n" "$prompt" | claude -p --model "$use_model" > "$output_file" 2> "$err_file"; then
+      # --tools "" strictly disables Claude's ability to use Edit/Git/Bash, forcing raw stdout
+      if printf "%s\\n" "$prompt" | timeout 240 claude -p --model "$use_model" --dangerously-skip-permissions --tools "" > "$output_file" 2> "$err_file"; then
         cmd_ok=true
       fi
     else
-      if printf "%s\\n" "$prompt" | gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
+      if printf "%s\\n" "$prompt" | timeout 240 gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
         cmd_ok=true
       fi
     fi
@@ -819,6 +825,11 @@ Your VERY FIRST character of output must be '@' (for @import) or ':' (for :root)
 Do NOT output any explanation, commentary, or preamble. Just raw CSS.
 Do NOT wrap in markdown code blocks. Just the raw CSS code.
 Include @import for Google Fonts at the top if needed.
+
+STRICT SERVER-SIDE ENVIRONMENT RULES:
+- NEVER use bash tools, git, or write to the filesystem directly.
+- NEVER try to push or commit anything to GitHub or any other repository.
+- You must ONLY return the raw text to standard output for the parent script to capture.
 
 HERE IS THE HTML TO STYLE:
 $GENERATED_HTML
