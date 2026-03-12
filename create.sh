@@ -514,7 +514,7 @@ DATA USAGE RULES:
 - Business name, tagline, nav structure → from scraped data
 - Services/offerings → from scraped services list (or raw_text_sections if services is empty)
 - About section → from scraped about text
-- Contact info → use scraped address, phone, email exactly
+- Contact info → use scraped address, phone, and email exactly. The address MUST be wrapped in a clickable link to Google Maps (e.g., <a href=\"https://www.google.com/maps/search/?api=1&query=ADDRESS\" target=\"_blank\">).
 - Social links → MUST be placed in the Footer as clickable Font Awesome icons (e.g. facebook, instagram, whatsapp, etc). Use the scraped URLs verbatim. DO NOT use generic '#' links if data is available.
 - Brand colors → base CSS palette on detected colors when available
 - Brand font → if a font was detected, use it or a harmonious companion via Google Fonts
