@@ -663,12 +663,16 @@ async def _do_scrape(query: str, max_results: int) -> dict:
 
             page = await context.new_page()
 
+            # Optimize performance by blocking non-essential resources
+            await page.route("**/*.{png,jpg,jpeg,gif,webp,svg,css,woff,woff2,ttf,otf}", lambda route: route.abort())
+
             safe_query = urllib.parse.quote_plus(query)
             # hl= keeps results in the configured language; cookie stops consent popup
             url = f"https://www.google.com/maps/search/{safe_query}?hl={SITE_LANG}"
 
             scrape_logger.info(f"🕵️ Scraping Maps for: {query} (URL: {url})")
-            await page.goto(url)
+            # domcontentloaded is much faster than the default networkidle/load
+            await page.goto(url, wait_until="domcontentloaded")
             scrape_logger.info(f"✅ Page loaded. Waiting for listings to appear...")
 
             # Dump any browser console errors to our backend log (helpful if maps throws JS errors)
@@ -688,61 +692,66 @@ async def _do_scrape(query: str, max_results: int) -> dict:
 
             listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
             found_count = len(listings)
-            scrape_logger.info(f"✅ Found {found_count} listing elements. Extracting up to {max_results}...")
+            num_to_scrape = min(max_results, found_count)
+            scrape_logger.info(f"✅ Found {found_count} listing elements. Extracting up to {num_to_scrape} in parallel...")
 
-            for i in range(min(max_results, found_count)):
-                listing = listings[i]
-
-                # Click to open the detail panel
-                await listing.click()
-                await page.wait_for_timeout(2500)  # sidebar animation
-
-                name, phone, website, address = "", "", "", ""
-
+            async def extract_details(index):
+                # Each extraction needs its own page to run in parallel effectively
+                # however to keep it simple and within the same session we use the shared context
+                det_page = await context.new_page()
+                # Block resources here too
+                await det_page.route("**/*.{png,jpg,jpeg,gif,webp,svg,css,woff,woff2,ttf,otf}", lambda route: route.abort())
+                
                 try:
-                    name = await page.locator('h1.DUwDvf').first.inner_text()
-                except: pass
+                    listing_url = await listings[index].get_attribute("href")
+                    await det_page.goto(listing_url, wait_until="domcontentloaded", timeout=15000)
+                    # Small wait for dynamic content to settle
+                    await det_page.wait_for_timeout(1000) 
 
-                try:
-                    niche_element = page.locator('button.DkEaL').first
-                    raw_niche = await niche_element.inner_text()
-                    niche = clean_google_text(raw_niche)
-                except:
-                    # Fallback: use first word of the search query
-                    niche = query.split(" ")[0]
+                    name, phone, website, address, niche = "", "", "", "", ""
 
-                try:
-                    address_element = page.locator(
-                        'button[data-tooltip*="indirizzo" i], button[data-tooltip*="address" i]'
-                    ).first
-                    address = clean_google_text(await address_element.inner_text())
-                except: pass
+                    try: name = await det_page.locator('h1.DUwDvf').first.inner_text()
+                    except: pass
 
-                try:
-                    phone_element = page.locator(
-                        'button[data-tooltip*="telefono" i], button[data-tooltip*="phone" i]'
-                    ).first
-                    phone = clean_google_text(await phone_element.inner_text())
-                except: pass
+                    try:
+                        raw_niche = await det_page.locator('button.DkEaL').first.inner_text()
+                        niche = clean_google_text(raw_niche)
+                    except: niche = query.split(" ")[0]
 
-                try:
-                    website_element = page.locator(
-                        'a[data-tooltip*="sito" i], a[data-tooltip*="website" i]'
-                    ).first
-                    website = await website_element.get_attribute('href')
-                except: pass
+                    try:
+                        addr_el = det_page.locator('button[data-tooltip*="indirizzo" i], button[data-tooltip*="address" i]').first
+                        address = clean_google_text(await addr_el.inner_text())
+                    except: pass
 
-                if name:
-                    scrape_logger.debug(f"ℹ️ Extracted [{i+1}/{max_results}]: {name} | {phone}")
-                    results.append({
-                        "business_name": name,
-                        "niche": niche,
-                        "address": address,
-                        "tel": phone,
-                        "website": website
-                    })
-                else:
-                    scrape_logger.warning(f"⚠️ Listing {i+1} failed to extract a business name.")
+                    try:
+                        phone_el = det_page.locator('button[data-tooltip*="telefono" i], button[data-tooltip*="phone" i]').first
+                        phone = clean_google_text(await phone_el.inner_text())
+                    except: pass
+
+                    try:
+                        web_el = det_page.locator('a[data-tooltip*="sito" i], a[data-tooltip*="website" i]').first
+                        website = await web_el.get_attribute('href')
+                    except: pass
+
+                    if name:
+                        scrape_logger.debug(f"ℹ️ Extracted [{index+1}/{num_to_scrape}]: {name}")
+                        return {
+                            "business_name": name,
+                            "niche": niche,
+                            "address": address,
+                            "tel": phone,
+                            "website": website
+                        }
+                except Exception as e:
+                    scrape_logger.warning(f"⚠️ Detail extraction failed for index {index}: {e}")
+                finally:
+                    await det_page.close()
+                return None
+
+            # Execute extractions in parallel
+            tasks = [extract_details(i) for i in range(num_to_scrape)]
+            parallel_results = await asyncio.gather(*tasks)
+            results = [r for r in parallel_results if r]
 
             await browser.close()
             scrape_logger.info(f"🚦 Releasing scraper lock for: {query}. Successfully extracted {len(results)} items.")
