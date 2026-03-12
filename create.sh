@@ -663,11 +663,11 @@ generate_text_with_retry() {
     # Dispatch to the correct CLI
     local cmd_ok=false
     if [ "$use_engine" = "claude" ]; then
-      if echo "$prompt" | claude -p --model "$use_model" > "$output_file" 2> "$err_file"; then
+      if printf "%s\\n" "$prompt" | claude -p --model "$use_model" > "$output_file" 2> "$err_file"; then
         cmd_ok=true
       fi
     else
-      if echo "$prompt" | gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
+      if printf "%s\\n" "$prompt" | gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
         cmd_ok=true
       fi
     fi
@@ -733,6 +733,9 @@ generate_text_with_retry() {
 }
 
 echo "🔨 Generating index.html ($LANG_NAME)..."
+echo "   [DEBUG] Tool: $TEXT_ENGINE | Model: $TEXT_MODEL"
+echo "   [DEBUG] Prompt excerpt: ${PROMPT:0:80}..."
+echo "   [DEBUG] Prompt length: ${#PROMPT} characters"
 if ! generate_text_with_retry "$PROMPT" "$FOLDER_NAME/index.html" "HTML"; then
   echo "❌ Failed to generate HTML. See build.log."
   exit 1
@@ -822,6 +825,9 @@ $GENERATED_HTML
 "
 
 echo "🎨 Generating style.css..."
+echo "   [DEBUG] Tool: $TEXT_ENGINE | Model: $TEXT_MODEL"
+echo "   [DEBUG] Prompt excerpt: ${CSS_PROMPT:0:80}..."
+echo "   [DEBUG] Prompt length: ${#CSS_PROMPT} characters"
 if ! generate_text_with_retry "$CSS_PROMPT" "$FOLDER_NAME/style.css" "CSS"; then
   echo "❌ Failed to generate CSS. See build.log."
   exit 1

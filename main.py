@@ -313,13 +313,13 @@ async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_del
 
     try:
         async with httpx.AsyncClient(timeout=_timeout) as client:
-            logger.info(f"📤 [WEBHOOK] Posting to {label}...")
+            logger.info(f"📤 [WEBHOOK] {label} → POSTing to: {webhook_url}")
             r = await client.post(webhook_url, json=payload)
             if r.status_code < 400:
-                logger.info(f"✅ [WEBHOOK] {label} → HTTP {r.status_code}")
+                logger.info(f"✅ [WEBHOOK] {label} → HTTP {r.status_code} from {webhook_url}")
             else:
                 logger.warning(
-                    f"⚠️ [WEBHOOK] {label} → HTTP {r.status_code}: {r.text[:200]}"
+                    f"⚠️ [WEBHOOK] {label} → HTTP {r.status_code} from {webhook_url}: {r.text[:200]}"
                 )
     except Exception as exc:
         logger.error(
@@ -452,6 +452,9 @@ async def build_site_and_notify(data: BusinessData):
 async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
     if not os.path.exists("./create.sh"):
         raise HTTPException(status_code=500, detail="create.sh not found on server")
+        
+    logger.info(f"🚀 [GENERATE] Job received for '{data.business_name}'")
+    logger.info(f"   [GENERATE] target webhook_url: {data.webhook_url}")
 
     # Add to background queue and return instantly
     background_tasks.add_task(build_site_and_notify, data)
