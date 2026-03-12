@@ -675,8 +675,7 @@ async def _do_scrape(query: str, max_results: int) -> dict:
             await page.goto(url, wait_until="domcontentloaded")
             scrape_logger.info(f"✅ Page loaded. Waiting for listings to appear...")
 
-            # Dump any browser console errors to our backend log (helpful if maps throws JS errors)
-            page.on("console", lambda msg: scrape_logger.debug(f"[BROWSER CONSOLE] {msg.type}: {msg.text}"))
+            # Console logging disabled to avoid spam from blocked resources (net::ERR_FAILED)
 
             # Wait for the listing feed to appear
             try:
