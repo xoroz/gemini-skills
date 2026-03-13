@@ -6,25 +6,13 @@ license: Complete terms in LICENSE.txt
 
 This skill guides creation of business landing pages that are visually polished and structurally reliable. The goal is a one-shot page that looks professional, loads fast, and works perfectly on mobile.
 
-## Design Thinking
-
-Before coding, commit to a cohesive design direction. Answer these four questions — the answers should shape every detail of the page:
-
-- **Purpose**: What does this business do? Who is its customer? What action should a visitor take?
-- **Tone**: Pick a specific direction that fits the niche. Not just "professional" — *which kind* of professional? Options: warm & artisanal, sleek & corporate, bold & energetic, refined & luxury, organic & natural, editorial & authoritative, industrial & utilitarian, clinical & precise. A barber shop and a law firm are both professional — they should not look the same.
-- **Constraints**: Use only local assets, separate HTML/CSS, no external images.
-- **Differentiation**: What is the one thing a visitor will remember? Commit to it and execute it with precision throughout.
-
-**NEVER converge on the same choices across different sites.** Every palette, font pairing, and layout approach should feel purpose-built for this specific business. Vary between light and dark themes, different accent strategies, different spatial rhythms.
-
 ## Design Direction
 
-Once you've answered the four questions above, make concrete decisions:
+Before coding, commit to a cohesive design direction based on the business niche:
 
-- **Typography**: Pick a distinctive Google Fonts pairing — one display font for headings, one readable font for body. NEVER use Inter, Roboto, Arial, or system fonts. Choose fonts that feel true to the niche and memorable.
-- **Color palette**: 3-4 colors max using CSS custom properties. A dark primary, a strong accent, and neutrals. Dominant colors with sharp accents outperform timid, evenly-distributed palettes. Match the niche (warm golds for luxury, deep greens for organic, cool blues for precision, terracotta for artisan, etc.).
-- **Atmosphere**: Don't default to flat solid color backgrounds in sections. Create depth with subtle gradients, noise textures, geometric patterns, layered transparencies, or grain overlays where appropriate. Dramatic shadows and decorative borders add richness.
-- **Spatial composition**: Within each section, avoid the default 3-column card grid. Consider asymmetry, overlap, diagonal flow, or generous negative space to create visual interest and rhythm.
+- **Typography**: Pick a distinctive Google Fonts pairing — one display font for headings, one readable font for body. NEVER use Inter, Roboto, Arial, or system fonts.
+- **Color palette**: 3-4 colors max using CSS custom properties. A dark primary, a strong accent, and neutrals. Match the niche (warm golds for luxury, clean blues for professional, rich greens for organic, etc.).
+- **Tone**: Professional and polished. Not flashy-for-the-sake-of-flashy. The page should feel like it was designed by a human for this specific business.
 
 ## Structural Blueprint
 
@@ -112,9 +100,7 @@ Include this JavaScript at the bottom of the HTML (inside a `<script>` tag) for 
 </script>
 ```
 
-Add `class="reveal"` to each major section (`<section>`). For animation quality, use staggered `animation-delay` on child elements within sections — one well-orchestrated reveal with staggered children creates far more delight than uniform simultaneous transitions.
-
-In the CSS, include:
+Add `class="reveal"` to each major section (`<section>`). In the CSS, include:
 
 ```css
 .reveal {
