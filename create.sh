@@ -406,17 +406,26 @@ IMAGES["process"]="Action candid of $NICHE workflow. Motion blur on hands, tacti
 
 # 5a. UPGRADE IMAGE PROMPTS WITH AI (clone mode only)
 #     Uses scraped data.json + raw.md to generate business-specific prompts.
+#     Model tier matches MODE: DEV=flash-lite, PROD=flash, SUPER=pro.
 #     Falls back to the generic prompts above if anything fails.
+if [ "$MODE" = "DEV" ]; then
+  IMG_PROMPT_MODEL="gemini-2.0-flash-lite"
+elif [ "$MODE" = "PROD" ]; then
+  IMG_PROMPT_MODEL="gemini-2.5-flash"
+else
+  IMG_PROMPT_MODEL="gemini-2.5-pro"
+fi
 if [ -n "$SCRAPED_DATA" ] && [ -n "$SCRAPE_DOMAIN" ] && [ "$MODE" != "MOCKUP" ]; then
   IMG_PROMPT_SCRIPT="$SCRIPT_DIR/scripts/generate_image_prompts.py"
   IMG_DATA_JSON="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/data.json"
   IMG_RAW_MD="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/raw.md"
   if [ -f "$IMG_PROMPT_SCRIPT" ] && [ -f "$IMG_DATA_JSON" ]; then
-    echo "🧠 Generating smart image prompts from scraped data..."
+    echo "🧠 Generating smart image prompts ($IMG_PROMPT_MODEL) from scraped data..."
     SMART_PROMPTS_FILE=$(mktemp)
     if uv run "$IMG_PROMPT_SCRIPT" \
         --data-json "$IMG_DATA_JSON" \
-        --raw-md    "$IMG_RAW_MD" > "$SMART_PROMPTS_FILE" 2>/dev/null; then
+        --raw-md    "$IMG_RAW_MD" \
+        --model     "$IMG_PROMPT_MODEL" > "$SMART_PROMPTS_FILE" 2>/dev/null; then
       # shellcheck source=/dev/null
       source "$SMART_PROMPTS_FILE"
       [ -n "${SMART_IMG_HERO:-}"      ] && IMAGES["hero"]="$SMART_IMG_HERO"
@@ -535,8 +544,8 @@ for IMG_NAME in "${!IMAGES[@]}"; do
 
   # Delay between requests (skip in DEV mode — cheap model has no rate limit concerns)
   if [ $IMG_COUNT -lt $IMG_TOTAL ] && [ "$MODE" != "DEV" ]; then
-    echo "     ⏱️  Waiting 10s before next image (rate limit protection)..."
-    sleep 10
+    echo "     ⏱️  Waiting 3s before next image (rate limit protection)..."
+    sleep 3
   fi
 done
 
