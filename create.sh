@@ -329,6 +329,68 @@ IMAGES_VIA_GEMINI=0
 IMAGES_VIA_OPENROUTER=0
 # IMG_COST_EACH is set above in the MODEL & PRICING block
 
+# 4b. SCRAPE SOURCE WEBSITE (if --website / WEBSITE_URL provided)
+#     Must run before image generation so scraped data can improve prompts.
+SCRAPED_DATA=""
+SCRAPE_SKILL_SECTION=""
+SCRAPE_DOMAIN=""
+if [ -n "$WEBSITE_URL" ]; then
+  SCRAPE_SCRIPT="$SCRIPT_DIR/scripts/scrape_site.py"
+  PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
+  if [ ! -f "$PYTHON_BIN" ]; then PYTHON_BIN="python3"; fi
+
+  if [ -f "$SCRAPE_SCRIPT" ]; then
+    echo "🔍 Scraping source website: $WEBSITE_URL"
+    SCRAPE_OUT=$("$PYTHON_BIN" "$SCRAPE_SCRIPT" "$WEBSITE_URL" 2>&1)
+    SCRAPE_EXIT=$?
+    echo "$SCRAPE_OUT" | sed 's/^/   /'
+
+    # Locate the raw.md file that was written
+    SCRAPE_DOMAIN=$(python3 -c "
+import re, sys
+from urllib.parse import urlparse
+u = sys.argv[1]
+if not u.startswith('http'): u = 'https://' + u
+domain = urlparse(u).netloc or u
+print(re.sub(r'[^a-z0-9.-]', '-', domain.lower()).strip('-'))
+" "$WEBSITE_URL" 2>/dev/null)
+    SCRAPE_MD="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/raw.md"
+
+    if [ $SCRAPE_EXIT -eq 0 ] && [ -f "$SCRAPE_MD" ]; then
+      SCRAPED_DATA=$(cat "$SCRAPE_MD")
+      echo "✅ Scrape complete — loaded: scrapes/${SCRAPE_DOMAIN}/raw.md"
+      SCRAPE_SKILL_SECTION="
+## REAL BUSINESS DATA (scraped from $WEBSITE_URL)
+
+The following data was automatically extracted from the client's existing website.
+Use it to populate ALL sections of the page with accurate, real content.
+Do NOT invent placeholder text where real data is available.
+
+\`\`\`
+$SCRAPED_DATA
+\`\`\`
+
+DATA USAGE RULES:
+- Business name, tagline, nav structure → from scraped data
+- Services/offerings → from scraped services list (or raw_text_sections if services is empty)
+- About section → from scraped about text
+- Contact info → use scraped address, phone, and email exactly. The address MUST be wrapped in a clickable link to Google Maps (e.g., <a href=\"https://www.google.com/maps/search/?api=1&query=ADDRESS\" target=\"_blank\">).
+- Social links → MUST be placed in the Footer as clickable Font Awesome icons (e.g. facebook, instagram, whatsapp, etc). Use the scraped URLs verbatim. DO NOT use generic '#' links if data is available.
+- Brand colors → base CSS palette on detected colors when available
+- Brand font → if a font was detected, use it or a harmonious companion via Google Fonts
+- Testimonials → from scraped testimonials (if any)
+- Image alt text → reference scraped image descriptions for meaningful alt attributes
+- NEVER hotlink scraped image URLs — use only the local assets/ files as always
+"
+    else
+      echo "⚠️  Scrape failed or raw.md not found — continuing without scraped data"
+    fi
+  else
+    echo "⚠️  Scrape script not found at $SCRAPE_SCRIPT — skipping"
+  fi
+  echo ""
+fi
+
 # 5. GENERATE LOCAL IMAGES WITH NANO-BANANA-PRO
 echo "🎨 Generating images with Nano Banana Pro..."
 echo "   Mode: $MODE  |  Model: $IMG_MODEL  |  ~\$${IMG_COST_EACH}/img"
@@ -341,6 +403,36 @@ IMAGES["gallery-2"]="Alternative low-angle perspective of $NICHE equipment/produ
 IMAGES["workshop"]="Wide interior shot of a $NICHE facility. Organized workspace, overhead industrial lighting mixed with natural window light, lived-in but clean professional atmosphere, bokeh background."
 IMAGES["detail"]="Macro photography of $NICHE craftsmanship. Focus on material texture (metal, wood, or tech), shallow depth of field (f/2.8), warm golden hour lighting, hyper-realistic, intricate details."
 IMAGES["process"]="Action candid of $NICHE workflow. Motion blur on hands, tactile engagement with tools, authentic workshop environment, documentary style, 4000k color temperature, professional grit."
+
+# 5a. UPGRADE IMAGE PROMPTS WITH AI (clone mode only)
+#     Uses scraped data.json + raw.md to generate business-specific prompts.
+#     Falls back to the generic prompts above if anything fails.
+if [ -n "$SCRAPED_DATA" ] && [ -n "$SCRAPE_DOMAIN" ] && [ "$MODE" != "MOCKUP" ]; then
+  IMG_PROMPT_SCRIPT="$SCRIPT_DIR/scripts/generate_image_prompts.py"
+  IMG_DATA_JSON="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/data.json"
+  IMG_RAW_MD="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/raw.md"
+  if [ -f "$IMG_PROMPT_SCRIPT" ] && [ -f "$IMG_DATA_JSON" ]; then
+    echo "🧠 Generating smart image prompts from scraped data..."
+    SMART_PROMPTS_FILE=$(mktemp)
+    if uv run "$IMG_PROMPT_SCRIPT" \
+        --data-json "$IMG_DATA_JSON" \
+        --raw-md    "$IMG_RAW_MD" > "$SMART_PROMPTS_FILE" 2>/dev/null; then
+      # shellcheck source=/dev/null
+      source "$SMART_PROMPTS_FILE"
+      [ -n "${SMART_IMG_HERO:-}"      ] && IMAGES["hero"]="$SMART_IMG_HERO"
+      [ -n "${SMART_IMG_GALLERY_1:-}" ] && IMAGES["gallery-1"]="$SMART_IMG_GALLERY_1"
+      [ -n "${SMART_IMG_GALLERY_2:-}" ] && IMAGES["gallery-2"]="$SMART_IMG_GALLERY_2"
+      [ -n "${SMART_IMG_WORKSHOP:-}"  ] && IMAGES["workshop"]="$SMART_IMG_WORKSHOP"
+      [ -n "${SMART_IMG_DETAIL:-}"    ] && IMAGES["detail"]="$SMART_IMG_DETAIL"
+      [ -n "${SMART_IMG_PROCESS:-}"   ] && IMAGES["process"]="$SMART_IMG_PROCESS"
+      echo "✅ Smart prompts ready"
+    else
+      echo "⚠️  Smart prompt generation failed — using generic prompts"
+    fi
+    rm -f "$SMART_PROMPTS_FILE"
+    echo ""
+  fi
+fi
 
 IMG_COUNT=0
 IMG_TOTAL=${#IMAGES[@]}
@@ -471,65 +563,7 @@ if [ -f "$OPTIMIZE_SCRIPT" ] && [ "$MODE" != "MOCKUP" ]; then
 fi
 
 
-# 6a. SCRAPE SOURCE WEBSITE (if --website / WEBSITE_URL provided)
-SCRAPED_DATA=""
-SCRAPE_SKILL_SECTION=""
-if [ -n "$WEBSITE_URL" ]; then
-  SCRAPE_SCRIPT="$SCRIPT_DIR/scripts/scrape_site.py"
-  PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
-  if [ ! -f "$PYTHON_BIN" ]; then PYTHON_BIN="python3"; fi
-
-  if [ -f "$SCRAPE_SCRIPT" ]; then
-    echo "🔍 Scraping source website: $WEBSITE_URL"
-    SCRAPE_OUT=$("$PYTHON_BIN" "$SCRAPE_SCRIPT" "$WEBSITE_URL" 2>&1)
-    SCRAPE_EXIT=$?
-    echo "$SCRAPE_OUT" | sed 's/^/   /'
-
-    # Locate the raw.md file that was written
-    SCRAPE_DOMAIN=$(python3 -c "
-import re, sys
-from urllib.parse import urlparse
-u = sys.argv[1]
-if not u.startswith('http'): u = 'https://' + u
-domain = urlparse(u).netloc or u
-print(re.sub(r'[^a-z0-9.-]', '-', domain.lower()).strip('-'))
-" "$WEBSITE_URL" 2>/dev/null)
-    SCRAPE_MD="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/raw.md"
-
-    if [ $SCRAPE_EXIT -eq 0 ] && [ -f "$SCRAPE_MD" ]; then
-      SCRAPED_DATA=$(cat "$SCRAPE_MD")
-      echo "✅ Scrape complete — loaded: scrapes/${SCRAPE_DOMAIN}/raw.md"
-      SCRAPE_SKILL_SECTION="
-## REAL BUSINESS DATA (scraped from $WEBSITE_URL)
-
-The following data was automatically extracted from the client's existing website.
-Use it to populate ALL sections of the page with accurate, real content.
-Do NOT invent placeholder text where real data is available.
-
-\`\`\`
-$SCRAPED_DATA
-\`\`\`
-
-DATA USAGE RULES:
-- Business name, tagline, nav structure → from scraped data
-- Services/offerings → from scraped services list (or raw_text_sections if services is empty)
-- About section → from scraped about text
-- Contact info → use scraped address, phone, and email exactly. The address MUST be wrapped in a clickable link to Google Maps (e.g., <a href=\"https://www.google.com/maps/search/?api=1&query=ADDRESS\" target=\"_blank\">).
-- Social links → MUST be placed in the Footer as clickable Font Awesome icons (e.g. facebook, instagram, whatsapp, etc). Use the scraped URLs verbatim. DO NOT use generic '#' links if data is available.
-- Brand colors → base CSS palette on detected colors when available
-- Brand font → if a font was detected, use it or a harmonious companion via Google Fonts
-- Testimonials → from scraped testimonials (if any)
-- Image alt text → reference scraped image descriptions for meaningful alt attributes
-- NEVER hotlink scraped image URLs — use only the local assets/ files as always
-"
-    else
-      echo "⚠️  Scrape failed or raw.md not found — continuing without scraped data"
-    fi
-  else
-    echo "⚠️  Scrape script not found at $SCRAPE_SCRIPT — skipping"
-  fi
-  echo ""
-fi
+# 6a. (scraping moved to step 4b — SCRAPED_DATA / SCRAPE_SKILL_SECTION already set)
 
 # 6. GENERATE HTML
 SKILL_INSTRUCTION="frontend-design skill"
