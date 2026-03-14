@@ -235,6 +235,7 @@ class AssignSiteData(BaseModel):
 
 class SiteEmailRequest(BaseModel):
     slug: str                       # Site slug, e.g. "arte-ottica"
+    flyer_id: str                   # Short ID assigned by admin portal, e.g. "00B"
     to_email: str                   # Recipient email address
     template: int = 1               # 1 = Sorpresa, 2 = Offerta, 3 = Diretto
     business_name: str = ""         # Override (auto-detected from registry/scrape)
@@ -242,7 +243,6 @@ class SiteEmailRequest(BaseModel):
     address: str = ""               # Override physical address
     primary_color: str = ""         # Override brand color (#rrggbb)
     website_url: str = ""           # Original scraped URL (to load data.json context)
-    preview_url: str = ""           # Override the full preview URL
 
 def clean_google_text(text: str) -> str:
     if not text:
@@ -1195,8 +1195,8 @@ async def send_site_email(req: SiteEmailRequest):
 
     Steps:
     1. Resolve business_name from registry if not supplied.
-    2. Allocate a new short email-campaign ID (no flyer generated).
-    3. Create sites/<email_id>.html redirect page with claim-bar.
+    2. Use flyer_id provided by the admin portal (no auto-allocation).
+    3. Create / overwrite sites/<flyer_id>.html redirect page with claim-bar iframe.
     4. Render the chosen HTML email template (1 = Sorpresa, 2 = Offerta, 3 = Diretto).
     5. Send via SMTP.
     6. Return email_id, preview_url, and subject.
@@ -1219,24 +1219,16 @@ async def send_site_email(req: SiteEmailRequest):
 
     niche_label = req.niche.strip() or "attività locale"
 
-    # ── 2. Allocate email-campaign short ID ─────────────────────────────────
-    logger.info(f"[EMAIL] Allocating email campaign ID for slug={req.slug}")
-    id_data   = await asyncio.to_thread(_allocate_email_id, req.slug, business_name)
-    email_id  = id_data.get("SITE_ID") if id_data else None
+    # ── 2. Use flyer_id assigned by the admin portal ────────────────────────
+    email_id = req.flyer_id.strip().upper()
+    if not email_id:
+        raise HTTPException(status_code=400, detail="flyer_id is required — assign it in the admin portal first.")
 
-    # ── 3. Create redirect page ─────────────────────────────────────────────
-    if email_id:
-        preview_url = await asyncio.to_thread(
-            _create_email_redirect_page, email_id, req.slug, business_name
-        )
-        logger.info(f"[EMAIL] Redirect page created: sites/{email_id}.html → {preview_url}")
-    else:
-        # Fallback: use the direct site URL
-        preview_url = req.preview_url or (
-            f"{REMOTE_SITE_URL}/{req.slug}/index.html" if REMOTE_SITE_URL
-            else f"/sites/{req.slug}/index.html"
-        )
-        logger.warning(f"[EMAIL] ID allocation failed — using direct URL: {preview_url}")
+    # ── 3. Create / overwrite redirect page for this flyer_id ───────────────
+    preview_url = await asyncio.to_thread(
+        _create_email_redirect_page, email_id, req.slug, business_name
+    )
+    logger.info(f"[EMAIL] Redirect page ready: sites/{email_id}.html → {preview_url}")
 
     # ── 4. Render template ──────────────────────────────────────────────────
     # Derive scrape domain from website_url if provided
