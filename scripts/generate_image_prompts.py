@@ -55,7 +55,11 @@ SYSTEM_PROMPT = (
     "hero, gallery-1, gallery-2, workshop, detail, process. "
     "Each value is a single image generation prompt string (60-180 characters). "
     "Be concrete and visual — focus on the specific niche, real services, "
-    "and brand aesthetic."
+    "and brand aesthetic. "
+    "CRITICAL: Every prompt MUST end with: NO text, NO words, NO letters, NO typography, "
+    "NO logos, NO signs — pure photographic image only. "
+    "The generated images will have HTML text overlaid on them; any text baked into the "
+    "image will clash and look broken."
 )
 
 

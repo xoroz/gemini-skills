@@ -397,7 +397,7 @@ echo "   Mode: $MODE  |  Model: $IMG_MODEL  |  ~\$${IMG_COST_EACH}/img"
 echo ""
 
 declare -A IMAGES
-IMAGES["hero"]="Cinematic wide-angle shot of $BUSINESS_NAME ($NICHE). Focal point on the primary service/product with dramatic rim lighting. 8k resolution, shot on 35mm lens, high contrast, elegant commercial aesthetic, depth of field."
+IMAGES["hero"]="Cinematic wide-angle shot for $NICHE business. Focal point on the primary service/product with dramatic rim lighting. 8k resolution, shot on 35mm lens, high contrast, elegant commercial aesthetic, depth of field. NO text, NO words, NO letters, NO typography, NO logos, NO signs, NO overlays — pure photographic image only."
 IMAGES["gallery-1"]="Pristine studio photograph of a $NICHE project. Neutral minimalist background, softbox lighting to eliminate harsh shadows, sharp focus, industrial design aesthetic, clean lines."
 IMAGES["gallery-2"]="Alternative low-angle perspective of $NICHE equipment/product. Bold composition, accent lighting highlighting textures, high-end commercial catalog style, crisp details."
 IMAGES["workshop"]="Wide interior shot of a $NICHE facility. Organized workspace, overhead industrial lighting mixed with natural window light, lived-in but clean professional atmosphere, bokeh background."
