@@ -1247,6 +1247,7 @@ async def send_site_email(req: SiteEmailRequest):
             primary_color= req.primary_color,
             address_line = req.address,
             scrape_domain= scrape_domain,
+            slug         = req.slug,
         )
         subject = eb.render_subject(req.template, business_name)
     except Exception as e:

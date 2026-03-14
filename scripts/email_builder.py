@@ -59,16 +59,58 @@ DEFAULT_SECONDARY = "#1e293b"
 # ---------------------------------------------------------------------------
 
 
+_SCRAPES_ROOT = Path(__file__).resolve().parent.parent / "scrapes"
+
+
 def _load_scrape_data(scrape_domain: str) -> Optional[dict]:
     """Load data.json from scrapes/<domain>/data.json if it exists."""
-    root = Path(__file__).resolve().parent.parent
-    path = root / "scrapes" / scrape_domain / "data.json"
+    path = _SCRAPES_ROOT / scrape_domain / "data.json"
     if path.exists():
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             pass
     return None
+
+
+def _find_scrape_data(slug: str, business_name: str) -> Optional[dict]:
+    """
+    Auto-discover scraped data for a site when no explicit domain is known.
+
+    Scans all scrapes/*/data.json files and returns the best match based on:
+      1. slug appears in the scraped site_url hostname
+      2. business_name appears in metadata.title (case-insensitive)
+
+    Returns the data dict, or None if nothing matches.
+    """
+    if not _SCRAPES_ROOT.exists():
+        return None
+
+    slug_clean       = slug.replace("-", "").lower()
+    biz_clean        = re.sub(r"[^a-z0-9]", "", business_name.lower())
+    best: Optional[dict] = None
+
+    for data_path in sorted(_SCRAPES_ROOT.glob("*/data.json")):
+        try:
+            data = json.loads(data_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        site_url = data.get("site_url", "")
+        title    = data.get("metadata", {}).get("title", "")
+
+        host_clean  = re.sub(r"[^a-z0-9]", "", site_url.lower())
+        title_clean = re.sub(r"[^a-z0-9]", "", title.lower())
+
+        # Slug match is strongest signal
+        if slug_clean and slug_clean in host_clean:
+            return data  # immediate hit
+
+        # Business name match is good enough
+        if biz_clean and len(biz_clean) >= 4 and biz_clean in title_clean:
+            best = data   # keep scanning for a slug hit
+
+    return best
 
 
 def _pick_primary_color(scraped: Optional[dict], override: str = "") -> str:
@@ -101,9 +143,16 @@ def render_email(
     primary_color: str = "",
     address_line: str = "",
     scrape_domain: str = "",
+    slug: str = "",
 ) -> str:
     """
     Render the HTML email for the given template number (1, 2, or 3).
+
+    Scraped data is loaded automatically:
+      - If scrape_domain is given → load scrapes/<scrape_domain>/data.json directly.
+      - Otherwise → scan all scrapes/*/data.json and pick the best match for
+        slug / business_name. Covers the common case where the site was built
+        with --website and the scrape cache already exists.
 
     Returns the rendered HTML string.
     Raises ValueError for unknown template numbers.
@@ -115,7 +164,11 @@ def render_email(
     if not template_path.exists():
         raise FileNotFoundError(f"Template file not found: {template_path}")
 
-    scraped = _load_scrape_data(scrape_domain) if scrape_domain else None
+    if scrape_domain:
+        scraped = _load_scrape_data(scrape_domain)
+    else:
+        scraped = _find_scrape_data(slug, business_name)
+
     color   = _pick_primary_color(scraped, primary_color)
     address = _pick_address(scraped, address_line)
 
