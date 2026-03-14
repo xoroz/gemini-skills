@@ -3,6 +3,8 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 import re
+import smtplib
+import subprocess
 import urllib.parse
 import asyncio
 import signal
@@ -10,6 +12,7 @@ import httpx
 import os
 import logging
 import json
+from email.message import EmailMessage
 from logging.handlers import RotatingFileHandler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -111,6 +114,10 @@ _tags_metadata = [
     {
         "name": "scraping",
         "description": "Scrape Google Maps to discover business leads.",
+    },
+    {
+        "name": "email",
+        "description": "Send personalised HTML site-delivery emails to clients.",
     },
 ]
 
@@ -225,6 +232,17 @@ class CreateFlyersData(BaseModel):
 class AssignSiteData(BaseModel):
     site_id: str
     site_slug: str
+
+class SiteEmailRequest(BaseModel):
+    slug: str                       # Site slug, e.g. "arte-ottica"
+    to_email: str                   # Recipient email address
+    template: int = 1               # 1 = Sorpresa, 2 = Offerta, 3 = Diretto
+    business_name: str = ""         # Override (auto-detected from registry/scrape)
+    niche: str = ""                 # Business niche label
+    address: str = ""               # Override physical address
+    primary_color: str = ""         # Override brand color (#rrggbb)
+    website_url: str = ""           # Original scraped URL (to load data.json context)
+    preview_url: str = ""           # Override the full preview URL
 
 def clean_google_text(text: str) -> str:
     if not text:
@@ -1041,6 +1059,230 @@ async def assign_site(data: AssignSiteData):
     except Exception as e:
         logger.error(f"🔥 [ASSIGN] Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# 6b. SEND SITE EMAIL
+# ==========================================
+
+def _smtp_send(subject: str, html_body: str, to_email: str, from_email: str) -> None:
+    """Send an HTML email via SMTP. Reads credentials from environment."""
+    smtp_host = os.environ.get("SMTP_HOST", "ssl0.ovh.net")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+    if not smtp_user or not smtp_pass:
+        raise RuntimeError("SMTP_USER and SMTP_PASS must be set in .env")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"]    = from_email
+    msg["To"]      = to_email
+    msg.set_content("Apri questa email in un client HTML per visualizzarla correttamente.")
+    msg.add_alternative(html_body, subtype="html")
+
+    with smtplib.SMTP(smtp_host, smtp_port) as s:
+        s.ehlo()
+        s.starttls()
+        s.ehlo()
+        s.login(smtp_user, smtp_pass)
+        s.send_message(msg)
+
+
+def _allocate_email_id(slug: str, business_name: str) -> Optional[dict]:
+    """
+    Allocate a new short ID for the email campaign (no flyer generated).
+    Returns the id_manager output dict or None on failure.
+    """
+    id_manager = os.path.join(os.path.dirname(__file__), "scripts", "id_manager.py")
+    if not os.path.exists(id_manager):
+        return None
+    try:
+        result = subprocess.run(
+            ["uv", "run", id_manager, "allocate",
+             "--business", business_name,
+             "--remote-url", REMOTE_SITE_URL],
+            capture_output=True, text=True, timeout=15,
+            cwd=os.path.dirname(__file__),
+        )
+        out = result.stdout
+        parsed = {}
+        for line in out.splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                parsed[k.strip()] = v.strip()
+        return parsed if parsed.get("SITE_ID") else None
+    except Exception as e:
+        logger.warning(f"[EMAIL] ID allocation failed: {e}")
+        return None
+
+
+def _create_email_redirect_page(email_id: str, slug: str, business_name: str, lang: str = "it") -> str:
+    """
+    Create sites/<email_id>.html — same claim-bar iframe wrapper as create.sh,
+    but pointing at the given slug. Returns the public URL.
+    """
+    sites_dir = os.path.join(os.path.dirname(__file__), "sites")
+    os.makedirs(sites_dir, exist_ok=True)
+
+    encoded_name = urllib.parse.quote(business_name)
+    if lang == "it":
+        claim_msg = (
+            f"Questo sito generato con AI per <strong>{business_name}</strong> "
+            f"è riservato per <strong>48 ore</strong>. "
+            f"Clicca <em>Richiedi</em> per evitare la scadenza del link."
+        )
+        claim_btn = "🚀 Richiedi il Sito"
+        msg_enc   = "S%C3%AC%2C+voglio+il+mio+sito+fatto+da+voi%21"
+    else:
+        claim_msg = (
+            f"This AI-generated site for <strong>{business_name}</strong> "
+            f"is reserved for <strong>48 hours</strong>. "
+            f"Click <em>Claim</em> to prevent link expiration."
+        )
+        claim_btn = "🚀 Claim Your Site"
+        msg_enc   = "Yes%2C+I+want+my+website+done+by+you%21"
+
+    claim_url = f"https://texngo.it/?name={encoded_name}&message={msg_enc}&focus=email#contact"
+    iframe_src = f"{slug}/index.html"
+
+    html = f"""<!DOCTYPE html>
+<html lang="{lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview → {business_name}</title>
+<style>
+  *, *::before, *::after {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  html, body {{ height: 100%; }}
+  body {{ display: flex; flex-direction: column; font-family: system-ui, sans-serif; background: #0f0f0f; }}
+  .claim-bar {{
+    flex-shrink: 0; display: flex; align-items: center;
+    justify-content: space-between; gap: 12px;
+    padding: 10px 20px; background: #111827; border-bottom: 1px solid #1f2937;
+  }}
+  .claim-bar .label {{ font-size: 13px; color: #9ca3af; line-height: 1.4; }}
+  .claim-bar .label strong {{ color: #f3f4f6; }}
+  .claim-bar a.cta {{
+    flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px;
+    background: linear-gradient(135deg, #f97316, #ea580c); color: #fff;
+    font-weight: 700; font-size: 14px; padding: 9px 20px; border-radius: 8px;
+    text-decoration: none; box-shadow: 0 2px 12px rgba(249,115,22,.4);
+  }}
+  iframe {{ flex: 1; width: 100%; border: none; display: block; }}
+</style>
+</head>
+<body>
+  <div class="claim-bar">
+    <p class="label">⏳ &nbsp;{claim_msg}</p>
+    <a class="cta" href="{claim_url}" target="_blank" rel="noopener">{claim_btn}</a>
+  </div>
+  <iframe src="{iframe_src}" title="{business_name} preview"></iframe>
+</body>
+</html>"""
+
+    path = os.path.join(sites_dir, f"{email_id}.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    return f"{REMOTE_SITE_URL}/{email_id}.html" if REMOTE_SITE_URL else f"/sites/{email_id}.html"
+
+
+@app.post("/send-site-email", dependencies=[Depends(verify_token)], tags=["email"])
+async def send_site_email(req: SiteEmailRequest):
+    """
+    Render a personalised HTML email and send it to the business contact.
+
+    Steps:
+    1. Resolve business_name from registry if not supplied.
+    2. Allocate a new short email-campaign ID (no flyer generated).
+    3. Create sites/<email_id>.html redirect page with claim-bar.
+    4. Render the chosen HTML email template (1 = Sorpresa, 2 = Offerta, 3 = Diretto).
+    5. Send via SMTP.
+    6. Return email_id, preview_url, and subject.
+    """
+    import sys, importlib.util
+    # Dynamically load email_builder without installing it as a package
+    builder_path = os.path.join(os.path.dirname(__file__), "scripts", "email_builder.py")
+    spec   = importlib.util.spec_from_file_location("email_builder", builder_path)
+    eb     = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eb)
+
+    # ── 1. Resolve business name ────────────────────────────────────────────
+    business_name = req.business_name.strip()
+    if not business_name:
+        entry = _lookup_site_id(req.slug)
+        if entry:
+            business_name = entry.get("business", req.slug.replace("-", " ").title())
+        else:
+            business_name = req.slug.replace("-", " ").title()
+
+    niche_label = req.niche.strip() or "attività locale"
+
+    # ── 2. Allocate email-campaign short ID ─────────────────────────────────
+    logger.info(f"[EMAIL] Allocating email campaign ID for slug={req.slug}")
+    id_data   = await asyncio.to_thread(_allocate_email_id, req.slug, business_name)
+    email_id  = id_data.get("SITE_ID") if id_data else None
+
+    # ── 3. Create redirect page ─────────────────────────────────────────────
+    if email_id:
+        preview_url = await asyncio.to_thread(
+            _create_email_redirect_page, email_id, req.slug, business_name
+        )
+        logger.info(f"[EMAIL] Redirect page created: sites/{email_id}.html → {preview_url}")
+    else:
+        # Fallback: use the direct site URL
+        preview_url = req.preview_url or (
+            f"{REMOTE_SITE_URL}/{req.slug}/index.html" if REMOTE_SITE_URL
+            else f"/sites/{req.slug}/index.html"
+        )
+        logger.warning(f"[EMAIL] ID allocation failed — using direct URL: {preview_url}")
+
+    # ── 4. Render template ──────────────────────────────────────────────────
+    # Derive scrape domain from website_url if provided
+    scrape_domain = ""
+    if req.website_url:
+        from urllib.parse import urlparse
+        domain = urlparse(req.website_url).netloc or req.website_url
+        scrape_domain = re.sub(r"[^a-z0-9.-]", "-", domain.lower()).strip("-")
+
+    try:
+        html_body = eb.render_email(
+            template     = req.template,
+            business_name= business_name,
+            niche_label  = niche_label,
+            site_url     = preview_url,
+            primary_color= req.primary_color,
+            address_line = req.address,
+            scrape_domain= scrape_domain,
+        )
+        subject = eb.render_subject(req.template, business_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Template render failed: {e}")
+
+    # ── 5. Send email ────────────────────────────────────────────────────────
+    from_email = os.environ.get("SMTP_USER", "info@texngo.it")
+    logger.info(f"[EMAIL] Sending template={req.template} to={req.to_email} subject={subject!r}")
+    try:
+        await asyncio.to_thread(_smtp_send, subject, html_body, req.to_email, from_email)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(status_code=500, detail="SMTP authentication failed — check SMTP_USER/SMTP_PASS")
+    except smtplib.SMTPException as e:
+        raise HTTPException(status_code=500, detail=f"SMTP error: {e}")
+
+    logger.info(f"[EMAIL] ✅ Sent to {req.to_email} — email_id={email_id}")
+
+    return {
+        "ok": True,
+        "to": req.to_email,
+        "subject": subject,
+        "template": req.template,
+        "email_id": email_id,
+        "preview_url": preview_url,
+        "slug": req.slug,
+    }
 
 
 # ==========================================

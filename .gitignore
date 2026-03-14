@@ -1,5 +1,6 @@
 # ── Gemini / Claude local settings ──────────────────────────────────────────
 .claude/
+!.claude/commands/        # project slash-commands — shared with the team
 .gemini/
 logs/
 # ── Environment / secrets ─────────────────────────────────────────────────────
