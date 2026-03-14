@@ -17,6 +17,7 @@ from logging.handlers import RotatingFileHandler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, List
+from scripts.s3_upload import S3WebsiteUploader
 
 # ---------------------------------------------------------------------------
 # Setup Logging
@@ -243,6 +244,11 @@ class SiteEmailRequest(BaseModel):
     address: str = ""               # Override physical address
     primary_color: str = ""         # Override brand color (#rrggbb)
     website_url: str = ""           # Original scraped URL (to load data.json context)
+
+class PublishResponse(BaseModel):
+    status: str
+    url: str
+    site_name: str
 
 def clean_google_text(text: str) -> str:
     if not text:
@@ -581,6 +587,61 @@ async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
             logger.warning(f"⚠️ [GENERATE] Could not pre-allocate ID: {exc}")
 
     return response
+
+
+@app.post("/publish-to-prod/{site_name}", dependencies=[Depends(verify_token)], tags=["sites"], response_model=PublishResponse)
+async def publish_to_prod(site_name: str):
+    """
+    Publish a generated site to the S3 production bucket.
+    """
+    logger.info(f"📤 [PUBLISH] Request for '{site_name}'")
+    try:
+        uploader = S3WebsiteUploader()
+        # Run the synchronous S3 sync in a thread to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        success, url = await loop.run_in_executor(None, uploader.sync_site, site_name)
+        
+        if not success:
+            logger.error(f"❌ [PUBLISH] Failed: {url}")
+            raise HTTPException(status_code=404, detail=url)
+            
+        logger.info(f"✅ [PUBLISH] Success: {site_name} -> {url}")
+        return {
+            "status": "OK",
+            "url": url,
+            "site_name": site_name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"🔥 [PUBLISH] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/delete-site/{site_name}", dependencies=[Depends(verify_token)], tags=["sites"])
+async def delete_site(site_name: str):
+    """
+    Delete a site from the S3 production bucket.
+    """
+    logger.info(f"🗑️ [DELETE] Request for '{site_name}'")
+    try:
+        uploader = S3WebsiteUploader()
+        loop = asyncio.get_event_loop()
+        success, message = await loop.run_in_executor(None, uploader.delete_site, site_name)
+        
+        if not success:
+            logger.error(f"❌ [DELETE] Failed: {message}")
+            raise HTTPException(status_code=500, detail=message)
+            
+        logger.info(f"✅ [DELETE] Success: {site_name}")
+        return {
+            "status": "OK",
+            "message": message,
+            "site_name": site_name
+        }
+    except Exception as e:
+        logger.error(f"🔥 [DELETE] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==========================================
