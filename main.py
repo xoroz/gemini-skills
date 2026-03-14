@@ -346,6 +346,67 @@ async def _post_webhook(webhook_url: str, payload: dict, label: str, initial_del
 
 
 
+def _scrape_contact(website_url: str, site_slug: str, business_name: str) -> dict:
+    """
+    Return contact fields from the local scrape cache, if available.
+
+    Priority:
+      1. website_url provided → derive domain → scrapes/<domain>/data.json
+      2. Scan all scrapes/*/data.json for slug or business_name match
+
+    Returns a dict with keys: emails, phones, physical_address, social_links.
+    Empty dict if nothing found.
+    """
+    import glob as _glob
+    scrapes_root = os.path.join(os.path.dirname(__file__), "scrapes")
+    data = None
+
+    # ── 1. Explicit domain from website_url ─────────────────────────────────
+    if website_url:
+        from urllib.parse import urlparse as _urlparse
+        domain = _urlparse(website_url).netloc or website_url
+        domain_slug = re.sub(r"[^a-z0-9.-]", "-", domain.lower()).strip("-")
+        path = os.path.join(scrapes_root, domain_slug, "data.json")
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+
+    # ── 2. Scan scrapes/ for slug / business name match ─────────────────────
+    if data is None:
+        slug_clean = site_slug.replace("-", "").lower()
+        biz_clean  = re.sub(r"[^a-z0-9]", "", business_name.lower())
+        best = None
+        for path in sorted(_glob.glob(os.path.join(scrapes_root, "*/data.json"))):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    candidate = json.load(f)
+            except Exception:
+                continue
+            host  = re.sub(r"[^a-z0-9]", "", candidate.get("site_url", "").lower())
+            title = re.sub(r"[^a-z0-9]", "", candidate.get("metadata", {}).get("title", "").lower())
+            if slug_clean and slug_clean in host:
+                data = candidate
+                break
+            if biz_clean and len(biz_clean) >= 4 and biz_clean in title:
+                best = candidate
+        if data is None and best is not None:
+            data = best
+
+    if not data:
+        return {}
+
+    ci = data.get("contact_info", {})
+    return {
+        "emails":           ci.get("emails", []),
+        "phones":           ci.get("phones", []),
+        "physical_address": ci.get("physical_address", ""),
+        "social_links":     {k: v for k, v in ci.get("social_links", {}).items() if v},
+    }
+
+
 def _lookup_site_id(slug: str) -> Optional[dict]:
     """Look up a slug in sites/site-id.json and return its entry if found."""
     registry_path = os.path.join("sites", "site-id.json")
@@ -383,6 +444,10 @@ async def build_site_and_notify(data: BusinessData):
         if id_info:
             payload["site_id"] = id_info["id"]
             payload["url_id"] = id_info.get("url_id", "")
+
+        contact = _scrape_contact(data.website or "", site_slug, data.business_name)
+        if contact:
+            payload["contact"] = contact
 
         # Delay before firing: n8n's Wait node needs ~1-2s to register its listener
         # after the /generate-site response is received. Cache hits are instant,
@@ -448,6 +513,10 @@ async def build_site_and_notify(data: BusinessData):
                 payload["site_id"] = m_id.group(1)
             if m_urlid:
                 payload["url_id"] = m_urlid.group(1)
+
+            contact = _scrape_contact(data.website or "", site_slug, data.business_name)
+            if contact:
+                payload["contact"] = contact
         else:
             err_text = stderr.decode(errors="replace").strip()
             logger.error(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")

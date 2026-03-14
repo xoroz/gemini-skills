@@ -14,18 +14,22 @@ Before writing any code, run the scraper to collect real business data:
 venv/bin/python scripts/scrape_site.py <URL>
 ```
 
-This creates `scrapes/<domain>/data.json` and `scrapes/<domain>/raw.md` with:
-- Business name, tagline, description
-- Services / offerings
-- Contact info (address, phone, email)
-- Social media links
-- Nav structure
-- Detected brand colors and fonts
-- Gallery image URLs (for reference only — do NOT hotlink)
-- Testimonials (if found)
-- Raw text sections
+This creates two files:
 
-Read `scrapes/<domain>/raw.md` to understand the business before generating the page.
+**`scrapes/<domain>/data.json`** — structured data matching the standard schema:
+```
+site_url
+metadata      → title, description, favicon_url, language
+branding      → logo_url, color_palette {primary[], secondary[], background[]}, typography[]
+contact_info  → emails[], phones[], social_links {facebook, instagram, twitter, linkedin, youtube, tiktok, whatsapp}, physical_address
+layout_and_nav→ header_links [{label, href}], footer_links [{label, href}]
+content       → h1_headings[], h2_headings[], call_to_action_buttons [{text, link}], hero_image_url, image_gallery [{url, alt_text}]
+assets        → screenshot_file_path
+```
+
+**`scrapes/<domain>/raw.md`** — human-readable markdown summary (also includes services, about text, testimonials, raw text sections extracted for AI context).
+
+Read `scrapes/<domain>/raw.md` as the primary source — it contains all structured + extended data pre-formatted for easy consumption. Cross-reference `data.json` when you need exact field values.
 
 ## Step 2 — Design Direction
 
@@ -39,18 +43,22 @@ Apply the **same design standards as `frontend-design`**:
 
 Use the scraped data to fill every section with real content:
 
-| Section | Data source |
-|---------|-------------|
-| **Business name / logo text** | `business_name` |
-| **Nav links** | `nav_links` (adapt to page anchors) |
-| **Hero headline** | `tagline` or derived from `description` |
-| **Hero subtitle** | `description` or `about` (truncated) |
-| **Services cards** | `services` list (use scraped titles + descriptions) |
-| **About section** | `about` text |
-| **Contact info** | `address`, `phone`, `email` |
-| **Social links** | `social_links` map |
-| **Testimonials** | `testimonials` (if scraped) |
-| **Footer** | business name + social icons |
+| Section | JSON field | raw.md section |
+|---------|-----------|----------------|
+| **Business name / logo text** | `metadata.title` | top heading |
+| **Nav links** | `layout_and_nav.header_links[].label` | **Nav:** line |
+| **Hero headline** | `content.h1_headings[0]` | **H1:** line |
+| **Hero subtitle** | `metadata.description` | **Tagline:** line |
+| **Services cards** | _(raw.md only)_ | ## Services |
+| **About section** | _(raw.md only)_ | ## About |
+| **Contact — address** | `contact_info.physical_address` | **Address:** line |
+| **Contact — phone** | `contact_info.phones[0]` | **Phone:** line |
+| **Contact — email** | `contact_info.emails[0]` | **Email:** line |
+| **Social icons** | `contact_info.social_links.*` | ## Social Links |
+| **Brand colors** | `branding.color_palette.*` | ## Brand Colors |
+| **Fonts** | `branding.typography[]` | **Fonts detected:** line |
+| **Testimonials** | _(raw.md only)_ | ## Testimonials |
+| **Footer** | business name + `contact_info.social_links` | — |
 
 If a field is empty, write natural-sounding placeholder text fitting the business type — do NOT leave visible gaps or lorem ipsum.
 
