@@ -711,8 +711,10 @@ generate_text_with_retry() {
     # Dispatch to the correct CLI (with a 4-minute absolute timeout to prevent hanging)
     local cmd_ok=false
     if [ "$use_engine" = "claude" ]; then
+      # CLAUDE_CODE_SIMPLE=1 prevents Claude from loading CLAUDE.md (not needed for site gen).
+      # -p passes the skill instruction as the initial context; full prompt is piped via stdin.
       # --tools "" strictly disables Claude's ability to use Edit/Git/Bash, forcing raw stdout
-      if printf "%s\\n" "$prompt" | timeout 240 claude -p --model "$use_model" --dangerously-skip-permissions --tools "" > "$output_file" 2> "$err_file"; then
+      if printf "%s\\n" "$prompt" | CLAUDE_CODE_SIMPLE=1 timeout 240 claude -p "Use only frontend-design or frontend-clone skill at skills/frontend-design/SKILL.md to do the task." --model "$use_model" --dangerously-skip-permissions --tools "" > "$output_file" 2> "$err_file"; then
         cmd_ok=true
       fi
     else
