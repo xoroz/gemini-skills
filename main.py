@@ -847,10 +847,23 @@ async def _do_scrape(query: str, max_results: int) -> dict:
                 await browser.close()
                 return {"status": "error", "message": f"Could not find listings. Google might be blocking or DOM changed. See {error_screenshot}"}
 
-            listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
+            # Scroll the results feed to lazy-load more listings until we have enough.
+            # Google Maps only renders ~6-8 items initially; scrolling triggers more.
+            prev_count = 0
+            for _ in range(8):  # up to 8 scroll attempts
+                listings = await page.locator('a[href^="https://www.google.com/maps/place"]').all()
+                if len(listings) >= max_results:
+                    break
+                if len(listings) == prev_count:
+                    break  # no new items loaded — end of results
+                prev_count = len(listings)
+                # Scroll the last visible listing into view to trigger next batch
+                await listings[-1].scroll_into_view_if_needed()
+                await page.wait_for_timeout(1200)
+
             found_count = len(listings)
             num_to_scrape = min(max_results, found_count)
-            scrape_logger.info(f"✅ Found {found_count} listing elements. Extracting up to {num_to_scrape} in parallel...")
+            scrape_logger.info(f"✅ Found {found_count} listing elements after scrolling. Extracting up to {num_to_scrape} in parallel...")
 
             async def extract_details(index):
                 # Each extraction needs its own page to run in parallel effectively
@@ -937,7 +950,7 @@ async def scrape_google_maps(
     query: str = "",
     business_type: str = "",
     location: str = "",
-    max_results: int = 5,
+    max_results: int = 8,
 ):
     """
     Scrape Google Maps listings.
@@ -960,6 +973,8 @@ async def scrape_google_maps(
             status_code=422,
             detail="Provide either 'query' OR both 'business_type' and 'location'."
         )
+
+    max_results = min(max_results, 16)  # hard cap — Google Maps rarely returns more reliably
 
     # Build canonical query string from structured params when available
     if business_type and location:
