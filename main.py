@@ -17,6 +17,7 @@ from logging.handlers import RotatingFileHandler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, List
+from PIL import Image
 from scripts.s3_upload import S3WebsiteUploader
 
 # ---------------------------------------------------------------------------
@@ -289,13 +290,14 @@ def _site_slug(name: str) -> str:
 
 
 async def _take_screenshot(site_slug: str):
-    """Take a screenshot of the generated site using Playwright and save it."""
+    """Take a screenshot of the generated site using Playwright and save it as WebP."""
     index_file = os.path.join("sites", site_slug, "index.html")
-    screenshot_path = os.path.join("sites", site_slug, "screenshot.png")
-    
+    screenshot_png = os.path.join("sites", site_slug, "screenshot.png")
+    screenshot_webp = os.path.join("sites", site_slug, "screenshot.webp")
+
     if not os.path.exists(index_file):
         return
-        
+
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -303,12 +305,20 @@ async def _take_screenshot(site_slug: str):
                 args=['--no-sandbox', '--disable-setuid-sandbox']
             )
             page = await browser.new_page(viewport={"width": 1280, "height": 900})
-            
+
             abs_path = os.path.abspath(index_file)
             await page.goto(f"file://{abs_path}", wait_until="networkidle", timeout=15000)
-            await page.screenshot(path=screenshot_path, full_page=True)
-            logger.info(f"📸 [BACKGROUND] Screenshot saved for '{site_slug}' at {screenshot_path}")
+            await page.screenshot(path=screenshot_png, full_page=True)
             await browser.close()
+
+        # Convert PNG → WebP (cap width at 1280px, quality 75)
+        img = Image.open(screenshot_png)
+        if img.width > 1280:
+            ratio = 1280 / img.width
+            img = img.resize((1280, int(img.height * ratio)), Image.LANCZOS)
+        img.save(screenshot_webp, "WEBP", quality=75, method=4)
+        os.remove(screenshot_png)
+        logger.info(f"📸 [BACKGROUND] Screenshot saved as WebP for '{site_slug}' at {screenshot_webp}")
     except Exception as e:
         logger.warning(f"⚠️ [BACKGROUND] Failed to take screenshot for '{site_slug}': {e}")
 

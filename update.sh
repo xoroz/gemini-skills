@@ -94,6 +94,16 @@ fi
 NEW_HEAD=$(git rev-parse HEAD)
 log "Updated to $NEW_HEAD"
 
+# ── Reinstall dependencies if requirements.txt changed ──
+if git diff --name-only "$LOCAL_HEAD" "$NEW_HEAD" | grep -q "^requirements.txt$"; then
+    log "requirements.txt changed — reinstalling dependencies..."
+    if "$REPO_DIR/venv/bin/pip" install -r "$REPO_DIR/requirements.txt" --quiet 2>&1; then
+        log "Dependencies reinstalled successfully."
+    else
+        log "WARNING: pip install failed. Check requirements.txt or venv."
+    fi
+fi
+
 # ── Reload service (requires NOPASSWD in sudoers or user-level systemd) ──
 if systemctl --user restart auto-sites.service 2>/dev/null; then
     log "Restarted auto-sites.service (user unit)."

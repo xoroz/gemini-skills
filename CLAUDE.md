@@ -13,6 +13,90 @@ A mono-repo with two tightly-coupled components:
 
 ---
 
+# GLobal Project Understanding and view
+
+Requirement to have MCP to notion working and
+his file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
+# Project Task Manager — Notion Integration
+
+## Identity
+
+You are a developer working on the Texngo project ecosystem.
+You have access to Notion via MCP to manage tasks.
+
+## Notion References
+
+- **Task Board (database):** `30bd1cb0-80ca-8082-bec9-f98264a81588`
+- **Data Source (collection):** `collection://310d1cb0-80ca-80bd-adfa-000b08ba1779`
+- **Project Wiki:** `31ed1cb0-80ca-8113-a2c9-e0db4933342b`
+- **Wiki Pages:**
+  - 🔵 texngo: `31ed1cb0-80ca-8160-a785-e1b36ced5261`
+  - 🟡 texngo-ai: `31ed1cb0-80ca-81b8-8d03-cc579c340435`
+  - 🟤 autosite: `31ed1cb0-80ca-81ba-ad4d-e22c6b30d659`
+
+## Project Detection
+
+Detect the current project from the repo folder name:
+
+- If folder contains `texngo-ai` → Project = **texngo-ai**
+- If folder contains `gemini-skills` → Project = **autosite**
+- If folder contains `texngo` (but not `texngo-ai`) → Project = **texngo**
+- Otherwise → ask the user which project this repo belongs to
+
+## Task Workflow
+
+### When starting a session or when asked to "pick a task"
+
+1. **Detect project** from the current working directory
+2. **Fetch the project wiki page** (using the wiki page ID above) to understand the project context, tech stack, and architecture
+3. **Search the task board** for tasks where:
+   - `Project` = detected project name
+   - `Status` = "Not started"
+4. **List the tasks** with numbers and ask the user which one to work on
+5. **When user picks a task:**
+   a. Fetch the full task page to read any description/notes
+   b. Update the task Status to **"In progress"** using:
+
+      ```
+      notion-update-page → command: "update_properties"
+      page_id: <task_page_id>
+      properties: { "Status": "In progress" }
+      ```
+
+   c. Begin working on the task in the codebase
+6. **When the task is complete:**
+   a. Update the task Status to **"Done"** using:
+
+      ```
+      notion-update-page → command: "update_properties"
+      page_id: <task_page_id>
+      properties: { "Status": "Done" }
+      ```
+
+   b. Optionally add a summary of what was done to the task page content
+
+## Task Board Schema
+
+The Notion database has these properties:
+
+- **Name** (title) — task name
+- **Status** (status) — "Not started" | "In progress" | "Done"
+- **Project** (select) — "texngo" | "texngo-ai" | "autosite"
+- **Assign** (person) — who is assigned
+
+## Rules
+
+- Always fetch the wiki page FIRST to understand project context before coding
+- Never skip updating status — move to "In progress" before starting work
+- When done, always move to "Done" and briefly note what was changed
+- If a task is unclear, read the task page content for details
+- If still unclear, ask the user before proceeding!
+
+---
+
 ## Stack
 
 - **Python + FastAPI** (`main.py`)
@@ -102,6 +186,7 @@ SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS   # Email notifications
 Short ID format: `NNL` (e.g. `00A`) — 2600 total IDs.
 
 **Pre-print workflow:**
+
 ```bash
 # 1. Batch generate print-ready TIFFs
 uv run scripts/make_flyer.py --site-id "00A-00J" --force --remote-url "https://texngo.it" --format tiff
@@ -165,6 +250,7 @@ TEXT_ENGINE=gemini AI_MODEL_TEXT=gemini-3-flash-preview ./create.sh ...
 | **frontend-design** | "frontend", "design", "ui", "landing page", "dashboard" |
 
 Install extension:
+
 ```bash
 gemini extensions install https://github.com/xoroz/gemini-skills
 # or for local dev:
