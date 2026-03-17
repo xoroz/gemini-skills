@@ -473,83 +473,85 @@ async def build_site_and_notify(data: BusinessData):
 
     script_path = "./create.sh"
     process = None
-    try:
-        logger.info(f"⚙️ [BACKGROUND] Starting build for: {data.business_name} "
-              f"(timeout: {BUILD_TIMEOUT // 60}m)")
-
-        # start_new_session=True puts create.sh in its own process group so we
-        # can kill the whole tree (bash → gemini → uv → python …) at once.
-        build_env = {**os.environ}
-        if data.website:
-            build_env["WEBSITE_URL"] = data.website
-            logger.info(f"🔍 [BACKGROUND] frontend-clone mode — will scrape: {data.website}")
-
-        process = await asyncio.create_subprocess_exec(
-            script_path, data.business_name, data.niche, data.address, data.tel,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-            env=build_env,
-        )
-
-        # Wait for completion with a hard ceiling
+    logger.info(f"⏳ [BACKGROUND] Queued build for: {data.business_name} — waiting for build slot...")
+    async with build_semaphore:
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=BUILD_TIMEOUT,
+            logger.info(f"⚙️ [BACKGROUND] Starting build for: {data.business_name} "
+                        f"(timeout: {BUILD_TIMEOUT // 60}m)")
+
+            # start_new_session=True puts create.sh in its own process group so we
+            # can kill the whole tree (bash → gemini → uv → python …) at once.
+            build_env = {**os.environ}
+            if data.website:
+                build_env["WEBSITE_URL"] = data.website
+                logger.info(f"🔍 [BACKGROUND] frontend-clone mode — will scrape: {data.website}")
+
+            process = await asyncio.create_subprocess_exec(
+                script_path, data.business_name, data.niche, data.address, data.tel,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+                env=build_env,
             )
-        except asyncio.TimeoutError:
-            logger.warning(f"⏰ [BACKGROUND] Timeout ({BUILD_TIMEOUT // 60}m) hit for: "
-                  f"{data.business_name} — killing process group")
-            _kill_process_group(process)
-            payload = {
-                "status": "timeout",
-                "business_name": data.business_name,
-                "error": f"Build exceeded {BUILD_TIMEOUT // 60}-minute timeout and was killed.",
-            }
-            await _post_webhook(data.webhook_url, payload, f"timeout/{site_slug}")
-            return
 
-        if process.returncode == 0:
-            logger.info(f"✅ [BACKGROUND] Success: {data.business_name}")
-            
-            await _take_screenshot(site_slug)
-            
-            payload: dict = {"status": "success", "business_name": data.business_name}
-            if REMOTE_SITE_URL:
-                payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
+            # Wait for completion with a hard ceiling
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=BUILD_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ [BACKGROUND] Timeout ({BUILD_TIMEOUT // 60}m) hit for: "
+                               f"{data.business_name} — killing process group")
+                _kill_process_group(process)
+                payload = {
+                    "status": "timeout",
+                    "business_name": data.business_name,
+                    "error": f"Build exceeded {BUILD_TIMEOUT // 60}-minute timeout and was killed.",
+                }
+                await _post_webhook(data.webhook_url, payload, f"timeout/{site_slug}")
+                return
+
+            if process.returncode == 0:
+                logger.info(f"✅ [BACKGROUND] Success: {data.business_name}")
+
+                await _take_screenshot(site_slug)
+
+                payload: dict = {"status": "success", "business_name": data.business_name}
+                if REMOTE_SITE_URL:
+                    payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
+                else:
+                    payload["site_slug"] = site_slug
+
+                # Parse site_id/url_id from build output
+                build_output = stdout.decode(errors="replace")
+                m_id = re.search(r"SITE_ID=(\S+)", build_output)
+                m_urlid = re.search(r"URLID=(\S+)", build_output)
+                if m_id:
+                    payload["site_id"] = m_id.group(1)
+                if m_urlid:
+                    payload["url_id"] = m_urlid.group(1)
+
+                contact = _scrape_contact(data.website or "", site_slug, data.business_name)
+                if contact:
+                    payload["contact"] = contact
             else:
-                payload["site_slug"] = site_slug
+                err_text = stderr.decode(errors="replace").strip()
+                logger.error(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")
+                payload = {"status": "error", "error": err_text}
 
-            # Parse site_id/url_id from build output
-            build_output = stdout.decode(errors="replace")
-            m_id = re.search(r"SITE_ID=(\S+)", build_output)
-            m_urlid = re.search(r"URLID=(\S+)", build_output)
-            if m_id:
-                payload["site_id"] = m_id.group(1)
-            if m_urlid:
-                payload["url_id"] = m_urlid.group(1)
+            # Send result back to n8n Webhook
+            await _post_webhook(data.webhook_url, payload, f"build/{site_slug}")
 
-            contact = _scrape_contact(data.website or "", site_slug, data.business_name)
-            if contact:
-                payload["contact"] = contact
-        else:
-            err_text = stderr.decode(errors="replace").strip()
-            logger.error(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")
-            payload = {"status": "error", "error": err_text}
-
-        # Send result back to n8n Webhook
-        await _post_webhook(data.webhook_url, payload, f"build/{site_slug}")
-
-    except Exception as e:
-        logger.error(f"🔥 [BACKGROUND] Unexpected error: {e}")
-        if process is not None:
-            _kill_process_group(process)
-        await _post_webhook(
-            data.webhook_url,
-            {"status": "error", "error": str(e)},
-            f"exception/{site_slug}",
-        )
+        except Exception as e:
+            logger.error(f"🔥 [BACKGROUND] Unexpected error: {e}")
+            if process is not None:
+                _kill_process_group(process)
+            await _post_webhook(
+                data.webhook_url,
+                {"status": "error", "error": str(e)},
+                f"exception/{site_slug}",
+            )
 
 @app.post("/generate-site", dependencies=[Depends(verify_token)], tags=["sites"])
 async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
@@ -792,6 +794,11 @@ async def get_job_status(job_id: str):
 # ==========================================
 # 4. THE SCRAPER (Playwright)
 # ==========================================
+
+# Limit concurrent site builds to 1 — prevents simultaneous image API calls
+# from hitting rate limits when n8n sends several jobs at once.
+# Cache-hit paths bypass this lock and return instantly.
+build_semaphore = asyncio.Semaphore(1)
 
 # Use a Semaphore to ensure we only run 1 Chrome instance at a time for scraping.
 # n8n might send 5 requests at once; this queues them neatly so the VPS doesn't crash.
