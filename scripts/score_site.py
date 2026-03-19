@@ -204,23 +204,34 @@ def main() -> None:
                         help=f"OpenRouter model (default: {DEFAULT_MODEL})")
     args = parser.parse_args()
 
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    # Strip surrounding quotes that bash may have preserved when exporting from .env
+    # e.g. create.sh does `export "$line"` where $line = 'KEY="value"' → value includes quotes
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip().strip('"').strip("'")
     if not api_key:
-        print("[score] ERROR: OPENROUTER_API_KEY is not set", file=sys.stderr)
+        print("[score] ERROR: OPENROUTER_API_KEY is not set in environment or .env", file=sys.stderr)
         sys.exit(1)
+    print(f"[score] API key: {api_key[:8]}... ({len(api_key)} chars)", file=sys.stderr)
+
+    # Persistent tmp dir for screenshots (avoids polluting site directories)
+    script_root = Path(__file__).resolve().parent.parent
+    scores_tmp  = script_root / "scrapes" / "scores_tmp"
+    scores_tmp.mkdir(parents=True, exist_ok=True)
 
     tmp_screenshot: Optional[Path] = None
 
     if args.screenshot:
         screenshot_path = Path(args.screenshot)
     elif args.html:
-        html_path       = Path(args.html)
-        tmp_screenshot  = html_path.parent / "_score_tmp.png"
+        html_path      = Path(args.html)
+        slug           = html_path.parent.name
+        tmp_screenshot = scores_tmp / f"{slug}_score_tmp.png"
         print(f"[score] Rendering {html_path} ...", file=sys.stderr)
         take_screenshot(html_path, tmp_screenshot)
         screenshot_path = tmp_screenshot
     else:
-        tmp_screenshot  = Path("/tmp/_score_url.png")
+        import urllib.parse as _up
+        url_slug       = re.sub(r"[^a-z0-9]", "-", _up.urlparse(args.url).netloc.lower())[:40]
+        tmp_screenshot = scores_tmp / f"{url_slug}_score_tmp.png"
         print(f"[score] Screenshotting {args.url} ...", file=sys.stderr)
         take_url_screenshot(args.url, tmp_screenshot)
         screenshot_path = tmp_screenshot
