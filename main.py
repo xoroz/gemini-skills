@@ -1441,7 +1441,82 @@ async def send_site_email(req: SiteEmailRequest):
 
 
 # ==========================================
-# 7. REDIRECT DIRECT SITE IDs (e.g. 00A.html)
+# 7. SITE SCORING
+# ==========================================
+
+class ScoreSiteRequest(BaseModel):
+    slug: Optional[str] = None          # Score sites/<slug>/index.html
+    screenshot_path: Optional[str] = None  # Score an existing screenshot file
+    url: Optional[str] = None           # Score a live URL
+    label: str = "generated"           # Label for the score entry
+
+
+@app.post("/score-site", dependencies=[Depends(verify_token)], tags=["sites"])
+async def score_site_endpoint(req: ScoreSiteRequest):
+    """
+    Score a landing page screenshot using Claude vision.
+
+    Detects visual errors (hero text overlap, broken layouts, unreadable text)
+    and returns category scores (0-10 each) plus a total out of 80.
+
+    Supply one of: slug (generated site), screenshot_path, or url.
+    """
+    import subprocess as _sp
+    import tempfile
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    scorer = os.path.join(base_dir, "scripts", "score_site.py")
+
+    if not os.path.exists(scorer):
+        raise HTTPException(status_code=500, detail="score_site.py not found")
+
+    # Resolve the input source
+    if req.slug:
+        html_path = os.path.join(base_dir, "sites", req.slug, "index.html")
+        if not os.path.exists(html_path):
+            raise HTTPException(status_code=404, detail=f"Site not found: sites/{req.slug}/index.html")
+        score_out = os.path.join(base_dir, "sites", req.slug, "score.json")
+        cmd = ["uv", "run", scorer, "--html", html_path, "--out", score_out, "--label", req.label]
+    elif req.screenshot_path:
+        if not os.path.exists(req.screenshot_path):
+            raise HTTPException(status_code=404, detail=f"Screenshot not found: {req.screenshot_path}")
+        score_out = req.screenshot_path.replace(".png", "_score.json").replace(".webp", "_score.json")
+        cmd = ["uv", "run", scorer, "--screenshot", req.screenshot_path, "--label", req.label, "--out", score_out]
+    elif req.url:
+        with tempfile.NamedTemporaryFile(suffix="_score.json", delete=False) as tmp:
+            score_out = tmp.name
+        cmd = ["uv", "run", scorer, "--url", req.url, "--label", req.label, "--out", score_out]
+    else:
+        raise HTTPException(status_code=422, detail="Provide one of: slug, screenshot_path, or url")
+
+    logger.info(f"📊 [SCORE] Running scorer: {' '.join(cmd[:5])} ...")
+    try:
+        result = _sp.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={**os.environ},
+            cwd=base_dir,
+        )
+    except _sp.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Scoring timed out (120s)")
+
+    if result.returncode != 0:
+        logger.error(f"[SCORE] scorer failed: {result.stderr[:500]}")
+        raise HTTPException(status_code=500, detail=f"Scorer error: {result.stderr[:300]}")
+
+    try:
+        score_data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Scorer returned invalid JSON")
+
+    logger.info(f"📊 [SCORE] Done — total: {score_data.get('total', '?')}/80, errors: {score_data.get('visual_errors', [])}")
+    return score_data
+
+
+# ==========================================
+# 8. REDIRECT DIRECT SITE IDs (e.g. 00A.html)
 # ==========================================
 
 @app.get("/{filename}", tags=["redirect"])

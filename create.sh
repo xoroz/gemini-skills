@@ -1108,6 +1108,46 @@ echo ""
 echo "  📋 Full log: $LOG_FILE"
 echo ""
 
+# 10. SCORE THE GENERATED SITE
+# Runs Claude vision scoring on the generated index.html.
+# Also scores the original scraped site for comparison (clone mode only).
+SCORE_SCRIPT="$SCRIPT_DIR/scripts/score_site.py"
+if command -v uv &>/dev/null && [ -f "$SCORE_SCRIPT" ]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  📊 UX Score"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  # Score the generated site
+  SCORE_OUT="$FOLDER_NAME/score.json"
+  if uv run "$SCORE_SCRIPT" --html "$FOLDER_NAME/index.html" \
+       --out "$SCORE_OUT" --label "generated" >> "$LOG_FILE" 2>&1; then
+    SCORE_TOTAL=$(python3 -c "import json,sys; d=json.load(open('$SCORE_OUT')); print(d.get('total','?'))" 2>/dev/null || echo "?")
+    SCORE_ERRORS=$(python3 -c "import json,sys; d=json.load(open('$SCORE_OUT')); e=d.get('visual_errors',[]); print(', '.join(e) if e else 'none')" 2>/dev/null || echo "?")
+    echo "  ✅ Generated site:  $SCORE_TOTAL / 80"
+    echo "     Visual errors:   $SCORE_ERRORS"
+  else
+    echo "  ⚠️  Scoring failed (check build.log for details)"
+  fi
+
+  # Score the original site (clone mode only — uses existing scrape screenshot)
+  if [ -n "$SCRAPE_DOMAIN" ]; then
+    ORIG_SCREENSHOT="$SCRIPT_DIR/scrapes/${SCRAPE_DOMAIN}/screenshot.png"
+    ORIG_SCORE_OUT="$FOLDER_NAME/score-original.json"
+    if [ -f "$ORIG_SCREENSHOT" ]; then
+      if uv run "$SCORE_SCRIPT" --screenshot "$ORIG_SCREENSHOT" \
+           --out "$ORIG_SCORE_OUT" --label "original" >> "$LOG_FILE" 2>&1; then
+        ORIG_TOTAL=$(python3 -c "import json; d=json.load(open('$ORIG_SCORE_OUT')); print(d.get('total','?'))" 2>/dev/null || echo "?")
+        ORIG_ERRORS=$(python3 -c "import json; d=json.load(open('$ORIG_SCORE_OUT')); e=d.get('visual_errors',[]); print(', '.join(e) if e else 'none')" 2>/dev/null || echo "?")
+        echo "  📸 Original site:   $ORIG_TOTAL / 80"
+        echo "     Visual errors:   $ORIG_ERRORS"
+      fi
+    fi
+  fi
+
+  echo ""
+fi
+
 # Final URL output  — the 🌐 Open: line is used by test-all.py as a build-complete marker
 if [ -n "$REMOTE_SITE_URL" ]; then
   SITE_PUBLIC_URL="$REMOTE_SITE_URL/$SITE_SLUG/index.html"
