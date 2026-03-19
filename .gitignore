@@ -27,7 +27,7 @@ uv.lock
 
 # ── Generated sites (output of create.sh / API) ───────────────────────────────
 sites/
-
+scrapes/
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
