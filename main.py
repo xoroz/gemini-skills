@@ -1511,7 +1511,7 @@ async def score_site_endpoint(req: ScoreSiteRequest):
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="Scorer returned invalid JSON")
 
-    logger.info(f"📊 [SCORE] Done — total: {score_data.get('total', '?')}/80, errors: {score_data.get('visual_errors', [])}")
+    logger.info(f"📊 [SCORE] Done — vote: {score_data.get('vote', '?')}/10, notes: {score_data.get('notes', [])}")
     return score_data
 
 

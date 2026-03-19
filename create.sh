@@ -1122,10 +1122,10 @@ if command -v uv &>/dev/null && [ -f "$SCORE_SCRIPT" ]; then
   SCORE_OUT="$FOLDER_NAME/score.json"
   if uv run "$SCORE_SCRIPT" --html "$FOLDER_NAME/index.html" \
        --out "$SCORE_OUT" --label "generated" >> "$LOG_FILE" 2>&1; then
-    SCORE_TOTAL=$(python3 -c "import json,sys; d=json.load(open('$SCORE_OUT')); print(d.get('total','?'))" 2>/dev/null || echo "?")
-    SCORE_ERRORS=$(python3 -c "import json,sys; d=json.load(open('$SCORE_OUT')); e=d.get('visual_errors',[]); print(', '.join(e) if e else 'none')" 2>/dev/null || echo "?")
-    echo "  ✅ Generated site:  $SCORE_TOTAL / 80"
-    echo "     Visual errors:   $SCORE_ERRORS"
+    SCORE_VOTE=$(python3 -c "import json; d=json.load(open('$SCORE_OUT')); print(d.get('vote','?'))" 2>/dev/null || echo "?")
+    SCORE_NOTES=$(python3 -c "import json; d=json.load(open('$SCORE_OUT')); print(' | '.join(d.get('notes',[])))" 2>/dev/null || echo "")
+    echo "  ✅ Generated site:  $SCORE_VOTE / 10"
+    [ -n "$SCORE_NOTES" ] && echo "     Notes: $SCORE_NOTES"
   else
     echo "  ⚠️  Scoring failed (check build.log for details)"
   fi
@@ -1137,10 +1137,10 @@ if command -v uv &>/dev/null && [ -f "$SCORE_SCRIPT" ]; then
     if [ -f "$ORIG_SCREENSHOT" ]; then
       if uv run "$SCORE_SCRIPT" --screenshot "$ORIG_SCREENSHOT" \
            --out "$ORIG_SCORE_OUT" --label "original" >> "$LOG_FILE" 2>&1; then
-        ORIG_TOTAL=$(python3 -c "import json; d=json.load(open('$ORIG_SCORE_OUT')); print(d.get('total','?'))" 2>/dev/null || echo "?")
-        ORIG_ERRORS=$(python3 -c "import json; d=json.load(open('$ORIG_SCORE_OUT')); e=d.get('visual_errors',[]); print(', '.join(e) if e else 'none')" 2>/dev/null || echo "?")
-        echo "  📸 Original site:   $ORIG_TOTAL / 80"
-        echo "     Visual errors:   $ORIG_ERRORS"
+        ORIG_VOTE=$(python3 -c "import json; d=json.load(open('$ORIG_SCORE_OUT')); print(d.get('vote','?'))" 2>/dev/null || echo "?")
+        ORIG_NOTES=$(python3 -c "import json; d=json.load(open('$ORIG_SCORE_OUT')); print(' | '.join(d.get('notes',[])))" 2>/dev/null || echo "")
+        echo "  📸 Original site:   $ORIG_VOTE / 10"
+        [ -n "$ORIG_NOTES" ] && echo "     Notes: $ORIG_NOTES"
       fi
     fi
   fi

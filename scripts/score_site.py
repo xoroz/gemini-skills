@@ -2,27 +2,37 @@
 """score_site.py — Visual UX scorer for landing pages.
 
 Takes a screenshot (or renders a local HTML / live URL) and scores it using
-Claude vision API. Detects visual errors such as hero text overlap, broken
-layouts, and unreadable content. Outputs structured JSON.
+OpenRouter with a vision-capable model. No external libraries — stdlib only
+(same pattern as generate_image_prompts.py).
+
+Output JSON:
+  {
+    "vote": 7,
+    "notes": ["hero overlay is clean", "nav CTA missing", "fonts readable"],
+    "improvements": ["add dark overlay to hero", "replace lorem ipsum in services", "add phone to footer"]
+  }
 
 Usage:
   uv run scripts/score_site.py --screenshot path/to/shot.png [--out score.json]
   uv run scripts/score_site.py --html path/to/index.html [--out score.json]
   uv run scripts/score_site.py --url https://example.com [--out score.json]
 
-Requires: ANTHROPIC_API_KEY in environment or .env
+Requires: OPENROUTER_API_KEY in environment or .env
 """
 
 import argparse
 import base64
 import json
 import os
+import re
 import sys
+import urllib.request
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-# Load .env if present so the script works standalone (outside FastAPI)
+# Load .env so the script works standalone (outside FastAPI)
 _env_path = Path(__file__).resolve().parent.parent / ".env"
 if _env_path.exists():
     with open(_env_path) as _f:
@@ -32,58 +42,36 @@ if _env_path.exists():
                 _k, _, _v = _line.partition("=")
                 os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
-# ---------------------------------------------------------------------------
-# Scoring prompt
-# ---------------------------------------------------------------------------
-SCORE_PROMPT = """You are a professional UX auditor reviewing a website screenshot.
+DEFAULT_MODEL = "google/gemini-3.1-flash-lite-preview"
 
-Score this landing page on each category from 0 to 10 (10 = perfect, 0 = completely broken).
-Be strict and realistic — a mediocre page should score 4-6, not 8-9.
+SCORE_PROMPT = """You are a professional UX reviewer auditing a website screenshot.
 
-SCORING CATEGORIES:
-- hero: Hero section — background image visible, text readable, dark overlay working correctly, no raw HTML text printed directly on image without legible overlay
-- navigation: Nav bar — logo present, links visible, CTA button present, looks structured and aligned
-- typography: Font quality, clear visual hierarchy (H1 > H2 > body), readability
-- color_contrast: Palette consistency, text vs background contrast (WCAG AA: 4.5:1 for normal text)
-- layout: Section structure, proper spacing, no overflow or clipping, grids/flexbox working
-- content: Content fills sections, no lorem ipsum, no visible placeholder gaps or empty blocks
-- mobile_readiness: Hamburger icon visible in nav, responsive layout indicators present
-- overall: Overall visual polish and professional appearance
-
-VISUAL ERRORS — check for each and include the key in visual_errors array only if clearly present:
-- "hero_text_overlap": HTML heading/subtitle text rendered directly on the hero image without a readable dark/color overlay, causing unreadable text or visual collision with the background image
-- "broken_layout": One or more sections appear visually broken — elements overflowing their containers, mis-positioned, or clipped
-- "missing_content": Visible empty sections, lorem ipsum placeholder text, or blank content blocks
-- "unreadable_text": Text color is too close to background color, making content hard to read
-- "nav_broken": Navigation bar appears broken — links overflowing, hamburger glitching, or structure collapsed
-- "image_missing": Visible broken image placeholders (missing image icons shown by browser)
-- "style_not_loaded": Page appears unstyled or CSS failed to load (plain HTML rendering)
-
-Return ONLY this JSON with no commentary, no markdown fences:
+Return ONLY a valid JSON object with exactly these 3 keys, no commentary:
 {
-  "scores": {
-    "hero": <0-10>,
-    "navigation": <0-10>,
-    "typography": <0-10>,
-    "color_contrast": <0-10>,
-    "layout": <0-10>,
-    "content": <0-10>,
-    "mobile_readiness": <0-10>,
-    "overall": <0-10>
-  },
-  "visual_errors": ["hero_text_overlap"],
-  "issues": ["specific issue description"],
-  "strengths": ["specific strength description"],
-  "total": <sum of all 8 scores, 0-80>
-}"""
+  "vote": <integer 0-10>,
+  "notes": ["<line 1>", "<line 2>", "<line 3>"],
+  "improvements": ["<line 1>", "<line 2>", "<line 3>"]
+}
+
+Scoring rules:
+- vote: 0 = completely broken/unstyled, 5 = mediocre but functional, 8 = good, 10 = excellent
+- notes: up to 3 short lines — describe what you observe (good or bad).
+  Look for: hero text unreadable over image, missing dark overlay, broken layout,
+  empty/placeholder sections, lorem ipsum, unreadable text colors, nav overflow,
+  CSS not loaded, missing images, elements overlapping.
+- improvements: up to 3 specific actionable lines for a designer rebuilding this site.
+  Examples: "add semi-transparent dark overlay to hero image", "increase body font contrast",
+  "replace placeholder text in services section with real content".
+
+Be strict. Be concise. Return JSON only."""
 
 
 # ---------------------------------------------------------------------------
-# Screenshot helpers
+# Screenshot helpers (Playwright)
 # ---------------------------------------------------------------------------
 
 def take_screenshot(html_path: Path, output_path: Path) -> None:
-    """Render a local HTML file to a PNG screenshot using Playwright."""
+    """Render a local HTML file to PNG at 1280×900 viewport."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -95,7 +83,7 @@ def take_screenshot(html_path: Path, output_path: Path) -> None:
 
 
 def take_url_screenshot(url: str, output_path: Path) -> None:
-    """Take a screenshot of a live URL using Playwright."""
+    """Screenshot a live URL at 1280×900 viewport."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -107,56 +95,97 @@ def take_url_screenshot(url: str, output_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Scoring via Claude vision
+# OpenRouter vision call
 # ---------------------------------------------------------------------------
 
-def score_screenshot(screenshot_path: Path) -> dict:
-    """Send a screenshot to Claude vision and return a UX score dict."""
-    import anthropic
-
-    suffix = screenshot_path.suffix.lower()
+def call_openrouter(image_path: Path, model: str, api_key: str) -> dict:
+    """Send a screenshot to an OpenRouter vision model and return the raw dict."""
+    suffix = image_path.suffix.lower()
     media_map = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
+        ".png":  "image/png",
+        ".jpg":  "image/jpeg",
         ".jpeg": "image/jpeg",
         ".webp": "image/webp",
     }
     media_type = media_map.get(suffix, "image/png")
 
-    with open(screenshot_path, "rb") as f:
-        image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+    with open(image_path, "rb") as f:
+        b64 = base64.standard_b64encode(f.read()).decode("utf-8")
 
-    client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        messages=[
+    payload = json.dumps({
+        "model": model,
+        "messages": [
             {
                 "role": "user",
                 "content": [
                     {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": image_data,
-                        },
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{b64}"},
                     },
                     {"type": "text", "text": SCORE_PROMPT},
                 ],
             }
         ],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 512,
+        "temperature": 0.3,
+    }).encode()
+
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+            "HTTP-Referer":  "https://github.com/xoroz/gemini-skills",
+            "X-Title":       "gemini-skills site scorer",
+        },
     )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        result = json.loads(resp.read())
 
-    raw = message.content[0].text.strip()
-    # Strip accidental markdown fences
-    if "```" in raw:
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) > 1 else raw
-        if raw.startswith("json"):
-            raw = raw[4:].strip()
+    raw = result["choices"][0]["message"]["content"]
+    return extract_json(raw)
 
-    return json.loads(raw)
+
+# ---------------------------------------------------------------------------
+# JSON helpers
+# ---------------------------------------------------------------------------
+
+def extract_json(text: str) -> dict:
+    """Parse JSON from model output, handling markdown fences and extra prose."""
+    text = text.strip()
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if m:
+        return json.loads(m.group(1))
+    # Fall back: grab the outermost { ... }
+    start = text.find("{")
+    end   = text.rfind("}")
+    if start != -1 and end != -1:
+        return json.loads(text[start:end + 1])
+    return json.loads(text)
+
+
+def validate(data: dict) -> dict:
+    """Coerce the model response into a clean, guaranteed-schema dict."""
+    # vote: must be int 0-10
+    try:
+        vote = max(0, min(10, int(float(str(data.get("vote", 5))))))
+    except (ValueError, TypeError):
+        vote = 5
+
+    def to_list(val: object, limit: int = 3) -> list:
+        if isinstance(val, list):
+            return [str(x).strip() for x in val[:limit] if str(x).strip()]
+        if isinstance(val, str) and val.strip():
+            return [val.strip()]
+        return []
+
+    return {
+        "vote":         vote,
+        "notes":        to_list(data.get("notes",        [])),
+        "improvements": to_list(data.get("improvements", [])),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -164,43 +193,58 @@ def score_screenshot(screenshot_path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Score a site screenshot with Claude vision")
+    parser = argparse.ArgumentParser(description="Score a site screenshot via OpenRouter vision")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--screenshot", help="Path to an existing screenshot file (PNG/WebP/JPG)")
-    group.add_argument("--html", help="Path to index.html — will be rendered to a screenshot first")
-    group.add_argument("--url", help="Live URL — will be screenshotted first")
-    parser.add_argument("--out", help="Write JSON result to this path (also prints to stdout)")
-    parser.add_argument("--label", default="site", help="Label for this score entry, e.g. 'original' or 'generated'")
+    group.add_argument("--screenshot", help="Path to existing screenshot (PNG/WebP/JPG)")
+    group.add_argument("--html",       help="Path to index.html — rendered to screenshot first")
+    group.add_argument("--url",        help="Live URL — screenshotted first")
+    parser.add_argument("--out",   help="Write JSON to this path (also printed to stdout)")
+    parser.add_argument("--label", default="site", help="Label: 'original', 'generated', etc.")
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                        help=f"OpenRouter model (default: {DEFAULT_MODEL})")
     args = parser.parse_args()
+
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        print("[score] ERROR: OPENROUTER_API_KEY is not set", file=sys.stderr)
+        sys.exit(1)
 
     tmp_screenshot: Optional[Path] = None
 
     if args.screenshot:
         screenshot_path = Path(args.screenshot)
     elif args.html:
-        html_path = Path(args.html)
-        tmp_screenshot = html_path.parent / "_score_tmp.png"
+        html_path       = Path(args.html)
+        tmp_screenshot  = html_path.parent / "_score_tmp.png"
         print(f"[score] Rendering {html_path} ...", file=sys.stderr)
         take_screenshot(html_path, tmp_screenshot)
         screenshot_path = tmp_screenshot
     else:
-        tmp_screenshot = Path("/tmp/_score_url.png")
+        tmp_screenshot  = Path("/tmp/_score_url.png")
         print(f"[score] Screenshotting {args.url} ...", file=sys.stderr)
         take_url_screenshot(args.url, tmp_screenshot)
         screenshot_path = tmp_screenshot
 
     if not screenshot_path.exists():
-        print(f"[score] ERROR: Screenshot not found at {screenshot_path}", file=sys.stderr)
+        print(f"[score] ERROR: screenshot not found: {screenshot_path}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[score] Scoring {screenshot_path} with Claude vision ...", file=sys.stderr)
-    result = score_screenshot(screenshot_path)
+    print(f"[score] Scoring via OpenRouter ({args.model}) ...", file=sys.stderr)
+    try:
+        raw    = call_openrouter(screenshot_path, args.model, api_key)
+        result = validate(raw)
+    except Exception as exc:
+        print(f"[score] ERROR: {exc}", file=sys.stderr)
+        if tmp_screenshot and tmp_screenshot.exists():
+            tmp_screenshot.unlink()
+        sys.exit(1)
 
-    result["label"] = args.label
+    # Annotate with metadata
+    result["label"]      = args.label
+    result["model"]      = args.model
     result["screenshot"] = str(screenshot_path)
-    result["scored_at"] = datetime.utcnow().isoformat() + "Z"
+    result["scored_at"]  = datetime.utcnow().isoformat() + "Z"
 
-    # Clean up temporary screenshot
     if tmp_screenshot and tmp_screenshot.exists():
         tmp_screenshot.unlink()
 
@@ -208,7 +252,7 @@ def main() -> None:
 
     if args.out:
         Path(args.out).write_text(output)
-        print(f"[score] Score saved to {args.out}", file=sys.stderr)
+        print(f"[score] Saved to {args.out}", file=sys.stderr)
 
     print(output)
 
