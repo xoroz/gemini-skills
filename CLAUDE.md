@@ -150,6 +150,8 @@ Docs: `http://localhost:8000/docs`
 | Script | Purpose |
 |--------|---------|
 | `create.sh` | Landing page builder — calls Gemini CLI + image.py |
+| `creator/CLAUDE.md` | Focused system prompt for site generation AI (injected via `-p`) |
+| `creator/skills/` | Symlinks to `frontend-design` and `frontend-clone` skills |
 | `scripts/make_flyer.py` | Stamps QR code + ID onto A5 template, outputs TIFF (CMYK) + PNG |
 | `scripts/id_manager.py` | CRUD for `sites/site-id.json` (allocate / assign / lookup / unassign / update / list) |
 | `assets/bin/send_mail.py` | General SMTP mailer |

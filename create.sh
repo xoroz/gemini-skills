@@ -663,6 +663,15 @@ STRICT SERVER-SIDE ENVIRONMENT RULES:
 - You must ONLY return the raw text to standard output for the parent script to capture.
 "
 
+# Load focused system prompt for site generation from creator/CLAUDE.md
+# Falls back to a short hardcoded preamble if the file is missing
+_CREATOR_CLAUDE_MD="$SCRIPT_DIR/creator/CLAUDE.md"
+if [ -f "$_CREATOR_CLAUDE_MD" ]; then
+  CREATOR_PREAMBLE=$(cat "$_CREATOR_CLAUDE_MD")
+else
+  CREATOR_PREAMBLE="You are an expert web designer generating landing pages for local businesses. Use only the frontend-design or frontend-clone skill. Output only raw HTML or CSS — no preamble, no markdown fences."
+fi
+
 # Function to generate text with retry logic
 # - Supports both Claude CLI and Gemini CLI (controlled by TEXT_ENGINE)
 # - On final retry: switches to the OTHER engine as fallback
@@ -712,9 +721,9 @@ generate_text_with_retry() {
     local cmd_ok=false
     if [ "$use_engine" = "claude" ]; then
       # CLAUDE_CODE_SIMPLE=1 prevents Claude from loading CLAUDE.md (not needed for site gen).
-      # -p passes the skill instruction as the initial context; full prompt is piped via stdin.
+      # -p injects creator/CLAUDE.md as the system prompt (focused design rules, no project noise).
       # --tools "" strictly disables Claude's ability to use Edit/Git/Bash, forcing raw stdout
-      if printf "%s\\n" "$prompt" | CLAUDE_CODE_SIMPLE=1 timeout 240 claude -p "Use only frontend-design or frontend-clone skill at skills/frontend-design/SKILL.md to do the task." --model "$use_model" --dangerously-skip-permissions --tools "" > "$output_file" 2> "$err_file"; then
+      if printf "%s\\n" "$prompt" | CLAUDE_CODE_SIMPLE=1 timeout 240 claude -p "$CREATOR_PREAMBLE" --model "$use_model" --dangerously-skip-permissions --tools "" > "$output_file" 2> "$err_file"; then
         cmd_ok=true
       fi
     else

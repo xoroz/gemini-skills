@@ -427,3 +427,31 @@ process = subprocess.Popen(
 ```
 
 Build logs stream to `logs/backend.log` and are polled via `GET /build-log/<slug>`.
+
+---
+
+## Creator System (`creator/`)
+
+The `creator/` directory provides a focused AI context for site generation, replacing the noisy root `CLAUDE.md` during HTML/CSS generation.
+
+```
+creator/
+├── CLAUDE.md        ← focused system prompt injected via -p flag
+└── skills/
+    ├── frontend-design  → symlink: ../../skills/frontend-design
+    └── frontend-clone   → symlink: ../../skills/frontend-clone
+```
+
+### How it works
+
+`create.sh` loads `creator/CLAUDE.md` at startup into `$CREATOR_PREAMBLE` and passes it as the `-p` argument to `claude`. This means Claude receives the full design rules as its system prompt instead of the brief one-liner that was previously hardcoded.
+
+`CLAUDE_CODE_SIMPLE=1` stays in place to prevent the root `CLAUDE.md` (which contains Notion, FastAPI, and systemd content) from loading during site generation.
+
+### Updating AI behavior
+
+To change how Claude generates sites, edit `creator/CLAUDE.md`. No changes to `create.sh` are needed. The file is loaded fresh on every `create.sh` run.
+
+### Fallback
+
+If `creator/CLAUDE.md` is missing, `create.sh` falls back to a short hardcoded preamble so builds never break silently.
