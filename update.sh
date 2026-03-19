@@ -107,7 +107,7 @@ if git diff --name-only "$LOCAL_HEAD" "$NEW_HEAD" | grep -q "^requirements.txt$"
 fi
 
 # ── Reload service (requires NOPASSWD in sudoers or user-level systemd) ──
-SERVICE="gemini-skills"
+SERVICE="auto-sites.service"
 if systemctl --user restart "$SERVICE" 2>/dev/null; then
     log "Restarted $SERVICE (user unit)."
 elif sudo -n systemctl restart "$SERVICE" 2>/dev/null; then
