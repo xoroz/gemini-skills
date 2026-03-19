@@ -86,8 +86,10 @@ fi
 
 # Restore stashed changes
 if [ "$STASHED" = true ]; then
-    if ! git stash pop --quiet 2>/dev/null; then
-        log "WARNING: Could not restore stashed changes (conflict?). They remain in stash."
+    if ! git stash pop 2>>"$LOG_FILE"; then
+        log "WARNING: stash pop had conflicts — dropping stash to keep pulled version clean."
+        git checkout -- . 2>/dev/null || true
+        git stash drop 2>/dev/null || true
     fi
 fi
 
@@ -105,12 +107,13 @@ if git diff --name-only "$LOCAL_HEAD" "$NEW_HEAD" | grep -q "^requirements.txt$"
 fi
 
 # ── Reload service (requires NOPASSWD in sudoers or user-level systemd) ──
-if systemctl --user restart auto-sites.service 2>/dev/null; then
-    log "Restarted auto-sites.service (user unit)."
-elif sudo -n systemctl restart auto-sites.service 2>/dev/null; then
-    log "Restarted auto-sites.service (system unit via sudo -n)."
+SERVICE="gemini-skills"
+if systemctl --user restart "$SERVICE" 2>/dev/null; then
+    log "Restarted $SERVICE (user unit)."
+elif sudo -n systemctl restart "$SERVICE" 2>/dev/null; then
+    log "Restarted $SERVICE (system unit via sudo -n)."
 else
-    log "WARNING: Could not restart auto-sites.service. Restart manually if needed."
+    log "WARNING: Could not restart $SERVICE. Run: sudo systemctl restart $SERVICE"
 fi
 
 log "Done."
