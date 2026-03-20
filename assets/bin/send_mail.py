@@ -160,10 +160,13 @@ def main() -> None:
     recipients = [r.strip() for r in args.to_addr.split(",") if r.strip()]
 
     # ── Build message ──────────────────────────────────────────────────────
+    BCC_COPY = "info@texngo.it"
+
     msg = EmailMessage()
     msg["Subject"] = args.subject
     msg["From"]    = args.from_addr
     msg["To"]      = ", ".join(recipients)
+    msg["Bcc"]     = BCC_COPY
 
     if is_html:
         # Set plain-text fallback then add HTML alternative
@@ -181,6 +184,7 @@ def main() -> None:
     print(f"📧  Sending via {SMTP_HOST}:{SMTP_PORT}")
     print(f"    From    : {args.from_addr}")
     print(f"    To      : {', '.join(recipients)}")
+    print(f"    Bcc     : {BCC_COPY}")
     print(f"    Subject : {args.subject}")
     print(f"    Body    : {'HTML' if is_html else 'plain text'}  ({len(body_text):,} chars)")
 
