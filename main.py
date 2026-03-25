@@ -51,6 +51,17 @@ sfh.setFormatter(formatter)
 scrape_logger.addHandler(sfh)
 scrape_logger.addHandler(ch)  # Also print to terminal
 
+# -- Dedicated Letter Logger --
+# To capture full JSON talks for Ufficio Postale
+letter_logger = logging.getLogger("letters")
+letter_logger.setLevel(logging.DEBUG)
+
+lfh = RotatingFileHandler("logs/letter.log", maxBytes=5*1024*1024, backupCount=2)
+lfh.setLevel(logging.DEBUG)
+lfh.setFormatter(formatter)
+letter_logger.addHandler(lfh)
+letter_logger.addHandler(ch)
+
 # ---------------------------------------------------------------------------
 # Load .env if present (optional — system env vars always take precedence)
 # ---------------------------------------------------------------------------
@@ -1543,24 +1554,25 @@ async def send_letter_endpoint(req: SendLetterRequest):
     if not api_token and not req.dry_run:
         raise HTTPException(
             status_code=500,
-            detail="OPENAPI_POST token is not configured. Set it in .env to send letters."
+            detail="Postal API token is not configured. Set it in .env to check letters."
         )
 
-    logger.info(
+    letter_logger.info(
         f"📮 [LETTER] {'DRY-RUN' if req.dry_run else ('SANDBOX' if test_mode else 'SENDING')} letter for "
         f"'{business_name}' to {req.recipient_name} at {req.recipient_address}"
     )
+    letter_logger.debug(f"[REQUEST JSON TO API] {json.dumps(payload, indent=2)}")
 
     try:
         result = await asyncio.to_thread(
             lb.send_letter, payload, api_token=api_token, dry_run=req.dry_run, test_mode=test_mode
         )
     except Exception as e:
-        logger.error(f"❌ [LETTER] API call failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Postal API error: {e}")
+        letter_logger.error(f"❌ [LETTER] API call failed exception: {e}")
+        raise HTTPException(status_code=502, detail=f"Postal API exception: {e}")
 
     if req.dry_run:
-        logger.info(f"📮 [LETTER] Dry-run complete for '{business_name}'")
+        letter_logger.info(f"📮 [LETTER] Dry-run complete for '{business_name}'")
     elif result.get("ok"):
         # Log successful order details to assets/letters/orders.json
         try:

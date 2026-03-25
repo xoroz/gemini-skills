@@ -79,11 +79,21 @@ _DUG_MAP = {
     "localita": "Località",
     "località": "Località",
     "borgata": "Borgata",
+    "borgo": "Borgo",
     "rione": "Rione",
     "frazione": "Frazione",
     "regione": "Regione",
     "ss": "Strada Statale",
     "sp": "Strada Provinciale",
+    "ruga": "Ruga",
+    "calle": "Calle",
+    "fondamenta": "Fondamenta",
+    "salizzada": "Salizzada",
+    "campiello": "Campiello",
+    "sestiere": "Sestiere",
+    "contrà": "Contrada",
+    "vicoletto": "Vicoletto",
+    "viazza": "Viazza",
 }
 
 
@@ -158,6 +168,40 @@ def parse_address(raw: str) -> dict:
         result["indirizzo"] = remainder.strip()
 
     return result
+
+
+def validate_address(addr: dict) -> None:
+    """
+    Validates the parsed Italian address against Ufficio Postale API limits.
+    Raises ValueError with a descriptive message if invalid.
+    """
+    if not addr["cap"] or not re.match(r"^\d{5}$", addr["cap"]):
+        raise ValueError(f"CAP must be exactly 5 digits. Got: '{addr['cap']}'")
+
+    if not addr["provincia"] or not re.match(r"^[A-Za-z]{2}$", addr["provincia"]):
+        raise ValueError(f"Provincia must be exactly 2 letters. Got: '{addr['provincia']}'")
+
+    if not addr["comune"]:
+        raise ValueError("Comune (City) could not be parsed or is missing.")
+    elif len(addr["comune"]) > 44:
+        raise ValueError(f"Comune exceeds 44 characters (Length: {len(addr['comune'])}).")
+
+    if not addr["indirizzo"]:
+        raise ValueError("Indirizzo (Street address) could not be parsed or is missing.")
+    
+    # DUG + space + Indirizzo combined <= 44 chars (API limit for street)
+    # The API combines them: e.g., "Via" + " " + "Roma"
+    dug = addr.get("dug", "")
+    full_street = f"{dug} {addr['indirizzo']}".strip()
+    if len(full_street) > 44:
+        # Auto-truncate to prevent 422
+        allowed_indirizzo_len = 44 - len(dug) - 1
+        addr["indirizzo"] = addr["indirizzo"][:allowed_indirizzo_len].strip()
+
+    if addr.get("civico") and len(addr["civico"]) > 15:
+        addr["civico"] = addr["civico"][:15]
+        
+    return None
 
 
 def default_sender() -> dict:
@@ -237,8 +281,12 @@ def build_payload(
     nome = name_parts[0] if name_parts else ""
     cognome = name_parts[1] if len(name_parts) > 1 else ""
 
-    # Parse address
+    # Parse and validate address
     addr = parse_address(recipient_address)
+    try:
+        validate_address(addr)
+    except ValueError as e:
+        raise ValueError(f"Invalid recipient address: {e}")
 
     destinatario = {
         "nome": nome,
