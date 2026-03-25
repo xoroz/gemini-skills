@@ -45,3 +45,7 @@ Thumbs.db
 
 # ── Feature Cache ────────────────────────────────────────────────────────────
 .cache/
+
+# ── Marketing Assets ──────────────────────────────────────────────────────────
+assets/letters/*
+!assets/letters/template_lettera.html

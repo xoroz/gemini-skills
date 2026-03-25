@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+"""
+Letter builder for TexNGo physical mail campaigns.
+
+Renders an HTML letter template with business-specific data,
+parses Italian addresses into structured fields for the OpenAPI
+Ufficio Postale API, and sends letters via Posta Ordinaria.
+
+API: POST https://ws.ufficiopostale.com/ordinarie/
+Docs: https://console.openapi.com/apis/ufficiopostale/documentation
+
+Usage (as module):
+    from scripts.letter_builder import render_letter, build_payload, send_letter
+
+    html = render_letter(
+        business_name="Arte Ottica",
+        niche_label="ottica",
+        site_url="https://dev.texngo.it/00A.html",
+    )
+
+    payload = build_payload(
+        sender=default_sender(),
+        recipient_name="Mario Rossi",
+        recipient_company="Arte Ottica",
+        recipient_address="Via Roma 1, 00100 Roma RM",
+        html_document=html,
+        color=False,
+        autoconfirm=False,
+    )
+
+    result = send_letter(payload, api_token="...", dry_run=True)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import datetime
+from pathlib import Path
+from string import Template
+from typing import Optional
+
+try:
+    import httpx
+except ImportError:
+    httpx = None  # type: ignore[assignment]
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "assets" / "letters"
+LETTER_TEMPLATE = TEMPLATE_DIR / "template_lettera.html"
+
+API_BASE_URL = "https://ws.ufficiopostale.com"
+API_TEST_URL = "https://test.ws.ufficiopostale.com"
+
+# ---------------------------------------------------------------------------
+# Italian address DUG (denominazione urbanistica generica) lookup
+# ---------------------------------------------------------------------------
+_DUG_MAP = {
+    "via": "Via",
+    "viale": "Viale",
+    "piazza": "Piazza",
+    "piazzale": "Piazzale",
+    "corso": "Corso",
+    "vicolo": "Vicolo",
+    "largo": "Largo",
+    "vico": "Vico",
+    "strada": "Strada",
+    "contrada": "Contrada",
+    "salita": "Salita",
+    "traversa": "Traversa",
+    "lungomare": "Lungomare",
+    "lungotevere": "Lungotevere",
+    "lungadige": "Lungadige",
+    "lungarno": "Lungarno",
+    "loc.": "Località",
+    "localita": "Località",
+    "località": "Località",
+    "borgata": "Borgata",
+    "rione": "Rione",
+    "frazione": "Frazione",
+    "regione": "Regione",
+    "ss": "Strada Statale",
+    "sp": "Strada Provinciale",
+}
+
+
+def parse_address(raw: str) -> dict:
+    """
+    Parse a free-form Italian address into structured API fields.
+
+    Accepts formats like:
+        "Via Roma 1, 00100 Roma RM"
+        "Piazza San Giovanni, 6, 00101 Roma RE"
+        "Via Dante Alighieri 12/A — 54033 Carrara MS"
+
+    Returns dict with keys: dug, indirizzo, civico, cap, comune, provincia.
+    Missing fields are empty strings (the API will reject if required ones are missing).
+    """
+    # Normalize separators
+    addr = raw.strip()
+    addr = addr.replace("—", ",").replace("–", ",").replace(" - ", ", ")
+
+    result = {
+        "dug": "",
+        "indirizzo": "",
+        "civico": "",
+        "cap": "",
+        "comune": "",
+        "provincia": "",
+    }
+
+    # Try to extract provincia (2-letter code at the end)
+    m_prov = re.search(r"\b([A-Z]{2})\s*$", addr)
+    if m_prov:
+        result["provincia"] = m_prov.group(1).upper()
+        addr = addr[: m_prov.start()].strip().rstrip(",").strip()
+
+    # Try to extract CAP (5 digits)
+    m_cap = re.search(r"\b(\d{5})\b", addr)
+    if m_cap:
+        result["cap"] = m_cap.group(1)
+        # Everything after CAP (before provincia) is the comune
+        after_cap = addr[m_cap.end() :].strip().rstrip(",").strip()
+        if after_cap:
+            result["comune"] = after_cap.strip()
+        addr = addr[: m_cap.start()].strip().rstrip(",").strip()
+
+    # Now addr should be like "Via Roma 1" or "Via Dante Alighieri 12/A"
+    # Try to split DUG from the rest
+    parts = addr.split(None, 1)  # Split on first whitespace
+    if parts:
+        first_word = parts[0].lower().rstrip(".")
+        if first_word in _DUG_MAP:
+            result["dug"] = _DUG_MAP[first_word]
+            remainder = parts[1] if len(parts) > 1 else ""
+        else:
+            # No recognized DUG, try two-word DUG like "Strada Statale"
+            if len(parts) > 1:
+                two_word = parts[0].lower() + " " + parts[1].split()[0].lower() if parts[1] else ""
+                if two_word in _DUG_MAP:
+                    result["dug"] = _DUG_MAP[two_word]
+                    remainder = " ".join(parts[1].split()[1:])
+                else:
+                    remainder = addr
+            else:
+                remainder = addr
+
+        # Extract civico (house number) — last number-like token
+        remainder = remainder.strip().rstrip(",").strip()
+        m_civico = re.search(r"[,\s]+(\d+[/]?\w*)\s*$", remainder)
+        if m_civico:
+            result["civico"] = m_civico.group(1)
+            remainder = remainder[: m_civico.start()].strip().rstrip(",").strip()
+
+        result["indirizzo"] = remainder.strip()
+
+    return result
+
+
+def default_sender() -> dict:
+    """
+    Build the sender (mittente) dict from environment variables.
+    Falls back to sensible defaults for TexNGo.
+    """
+    return {
+        "nome": os.environ.get("LETTER_SENDER_NAME", "TexNGo"),
+        "cognome": os.environ.get("LETTER_SENDER_COGNOME", "AI Agency"),
+        "dug": os.environ.get("LETTER_SENDER_DUG", "Via"),
+        "indirizzo": os.environ.get("LETTER_SENDER_ADDRESS", "del Tritone"),
+        "civico": os.environ.get("LETTER_SENDER_CIVICO", "1"),
+        "comune": os.environ.get("LETTER_SENDER_COMUNE", "Roma"),
+        "cap": os.environ.get("LETTER_SENDER_CAP", "00187"),
+        "provincia": os.environ.get("LETTER_SENDER_PROVINCIA", "RM"),
+        "nazione": "Italia",
+        "email": os.environ.get("LETTER_SENDER_EMAIL", "info@texngo.it"),
+    }
+
+
+def render_letter(
+    business_name: str,
+    niche_label: str,
+    site_url: str,
+    letter_date: str = "",
+) -> str:
+    """
+    Render the HTML letter template with variable substitution.
+    Returns the HTML string ready to be sent as the `documento` field.
+    """
+    if not LETTER_TEMPLATE.exists():
+        raise FileNotFoundError(f"Letter template not found: {LETTER_TEMPLATE}")
+
+    if not letter_date:
+        letter_date = datetime.now().strftime("%d/%m/%Y")
+
+    raw_html = LETTER_TEMPLATE.read_text(encoding="utf-8")
+
+    result = Template(raw_html).safe_substitute(
+        business_name=business_name,
+        niche_label=niche_label,
+        site_url=site_url,
+        letter_date=letter_date,
+    )
+    return result
+
+
+def build_payload(
+    sender: dict,
+    recipient_name: str,
+    recipient_company: str,
+    recipient_address: str,
+    html_document: str,
+    color: bool = False,
+    autoconfirm: bool = False,
+) -> dict:
+    """
+    Build the full JSON payload for POST /ordinarie/.
+
+    Args:
+        sender: Structured sender (mittente) dict
+        recipient_name: Full name, e.g. "Mario Rossi"
+        recipient_company: Company name (c/o field), e.g. "Arte Ottica SRL"
+        recipient_address: Free-form address, e.g. "Via Roma 1, 00100 Roma RM"
+        html_document: Rendered HTML letter content
+        color: Print in color (costs more)
+        autoconfirm: Send immediately without manual confirmation step
+    """
+    # Parse recipient name into nome/cognome
+    name_parts = recipient_name.strip().split(None, 1)
+    nome = name_parts[0] if name_parts else ""
+    cognome = name_parts[1] if len(name_parts) > 1 else ""
+
+    # Parse address
+    addr = parse_address(recipient_address)
+
+    destinatario = {
+        "nome": nome,
+        "cognome": cognome,
+        "dug": addr["dug"],
+        "indirizzo": addr["indirizzo"],
+        "civico": addr["civico"],
+        "comune": addr["comune"],
+        "cap": addr["cap"],
+        "provincia": addr["provincia"],
+        "nazione": "Italia",
+    }
+    if recipient_company:
+        destinatario["co"] = recipient_company
+
+    return {
+        "mittente": sender,
+        "destinatari": [destinatario],
+        "documento": [html_document],
+        "opzioni": {
+            "fronteretro": False,
+            "colori": color,
+            "ar": False,
+            "autoconfirm": autoconfirm,
+        },
+    }
+
+
+def send_letter(
+    payload: dict,
+    api_token: str,
+    dry_run: bool = False,
+    test_mode: bool = False,
+) -> dict:
+    """
+    Send the letter via the OpenAPI Ufficio Postale Posta Ordinaria API.
+
+    Args:
+        payload: Full request body (from build_payload)
+        api_token: Bearer token for the API
+        dry_run: If True, just return the payload without calling the API
+        test_mode: Use the sandbox base URL (https://test.ws.ufficiopostale.com)
+
+    Returns:
+        API response dict (or the payload dict in dry_run mode)
+    """
+    if dry_run:
+        return {"dry_run": True, "payload": payload}
+
+    if httpx is None:
+        raise ImportError("httpx is required: pip install httpx")
+
+    if not api_token:
+        raise ValueError("API token is required to send letters")
+
+    base = API_TEST_URL if (test_mode or "_TEST" in api_token or len(api_token) < 30) else API_BASE_URL
+    url = f"{base}/ordinarie/"
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json",
+    }
+
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(url, json=payload, headers=headers)
+
+    result = {
+        "status_code": response.status_code,
+        "ok": response.status_code in (200, 201, 202),
+    }
+
+    try:
+        result["data"] = response.json()
+    except Exception:
+        result["raw"] = response.text[:2000]
+
+    return result
+
+
+def get_letter_status(
+    order_id: str,
+    api_token: str,
+    test_mode: bool = False,
+) -> dict:
+    """
+    Retrieve the status and tracking details of a specific letter order.
+
+    Args:
+        order_id: The ID returned by POST /ordinarie/
+        api_token: Bearer token for the API
+        test_mode: Use the sandbox base URL
+    """
+    if httpx is None:
+        raise ImportError("httpx is required: pip install httpx")
+
+    if not api_token:
+        raise ValueError("API token is required to check order status")
+
+    base = API_TEST_URL if (test_mode or "_TEST" in api_token or len(api_token) < 30) else API_BASE_URL
+    url = f"{base}/ordinarie/{order_id}"
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+    }
+
+    with httpx.Client(timeout=15.0) as client:
+        response = client.get(url, headers=headers)
+
+    result = {
+        "status_code": response.status_code,
+        "ok": response.status_code == 200,
+    }
+
+    try:
+        result["data"] = response.json()
+    except Exception:
+        result["raw"] = response.text[:2000]
+
+    return result

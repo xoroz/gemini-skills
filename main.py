@@ -121,6 +121,10 @@ _tags_metadata = [
         "name": "email",
         "description": "Send personalised HTML site-delivery emails to clients.",
     },
+    {
+        "name": "letters",
+        "description": "Send physical marketing letters to business leads via Posta Ordinaria.",
+    },
 ]
 
 app = FastAPI(
@@ -234,6 +238,17 @@ class CreateFlyersData(BaseModel):
 class AssignSiteData(BaseModel):
     site_id: str
     site_slug: str
+
+class SendLetterRequest(BaseModel):
+    slug: str                       # Site slug, e.g. "arte-ottica"
+    recipient_name: str             # Full name, e.g. "Mario Rossi"
+    recipient_company: str = ""     # Company (c/o field), e.g. "Arte Ottica SRL"
+    recipient_address: str          # Free-form, e.g. "Via Roma 1, 00100 Roma RM"
+    business_name: str = ""         # Override (auto-detected from registry/slug)
+    niche: str = ""                 # Business niche label
+    color: bool = False             # Color printing (costs more)
+    autoconfirm: bool = False       # Send immediately without manual confirmation
+    dry_run: bool = False           # Print payload without calling API
 
 class SiteEmailRequest(BaseModel):
     slug: str                       # Site slug, e.g. "arte-ottica"
@@ -1438,6 +1453,209 @@ async def send_site_email(req: SiteEmailRequest):
         "preview_url": preview_url,
         "slug": req.slug,
     }
+
+
+# ==========================================
+# 6c. SEND PHYSICAL LETTER
+# ==========================================
+
+@app.post("/send-letter", dependencies=[Depends(verify_token)], tags=["letters"])
+async def send_letter_endpoint(req: SendLetterRequest):
+    """
+    Send a physical marketing letter to a business via Posta Ordinaria.
+
+    Uses the OpenAPI Ufficio Postale API to print and deliver a real letter
+    with the same branding and messaging as the email campaigns.
+
+    Steps:
+    1. Resolve business_name from registry if not supplied.
+    2. Build site_url from slug + REMOTE_SITE_URL.
+    3. Render the HTML letter template.
+    4. Parse recipient address into structured API fields.
+    5. Call the Posta Ordinaria API (or dry-run).
+    6. Return the API response with pricing and order ID.
+    """
+    import importlib.util
+
+    # Dynamically load letter_builder
+    builder_path = os.path.join(os.path.dirname(__file__), "scripts", "letter_builder.py")
+    spec = importlib.util.spec_from_file_location("letter_builder", builder_path)
+    lb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lb)
+
+    # ── 1. Resolve business name ────────────────────────────────────────────
+    business_name = req.business_name.strip()
+    if not business_name:
+        entry = _lookup_site_id(req.slug)
+        if entry:
+            business_name = entry.get("business", req.slug.replace("-", " ").title())
+        else:
+            business_name = req.slug.replace("-", " ").title()
+
+    niche_label = req.niche.strip() or "attività locale"
+
+    # ── 2. Build site URL ───────────────────────────────────────────────────
+    if REMOTE_SITE_URL:
+        site_url = f"{REMOTE_SITE_URL}/{req.slug}/index.html"
+    else:
+        site_url = f"https://dev.texngo.it/{req.slug}/index.html"
+
+    # ── 3. Render letter HTML ───────────────────────────────────────────────
+    try:
+        html_body = lb.render_letter(
+            business_name=business_name,
+            niche_label=niche_label,
+            site_url=site_url,
+        )
+        
+        # Save a copy to assets/letters/ for review
+        import re as _re
+        safe_name = _re.sub(r"[^a-z0-9]", "-", business_name.lower()).strip("-")
+        archive_path = os.path.join("assets", "letters", f"{safe_name}.html")
+        os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+        with open(archive_path, "w", encoding="utf-8") as f:
+            f.write(html_body)
+        logger.info(f"📄 [LETTER] Rendered copy saved to: {archive_path}")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Letter render failed: {e}")
+
+    # ── 4. Build API payload ────────────────────────────────────────────────
+    sender = lb.default_sender()
+    payload = lb.build_payload(
+        sender=sender,
+        recipient_name=req.recipient_name,
+        recipient_company=req.recipient_company,
+        recipient_address=req.recipient_address,
+        html_document=html_body,
+        color=req.color,
+        autoconfirm=req.autoconfirm,
+    )
+
+    # ── 5. Send or dry-run ──────────────────────────────────────────────────
+    test_mode = False
+    api_token = os.environ.get("OPENAPI_POST_TEST", "")
+    if api_token:
+        test_mode = True
+    else:
+        api_token = os.environ.get("OPENAPI_POST", "")
+
+    if not api_token and not req.dry_run:
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAPI_POST token is not configured. Set it in .env to send letters."
+        )
+
+    logger.info(
+        f"📮 [LETTER] {'DRY-RUN' if req.dry_run else ('SANDBOX' if test_mode else 'SENDING')} letter for "
+        f"'{business_name}' to {req.recipient_name} at {req.recipient_address}"
+    )
+
+    try:
+        result = await asyncio.to_thread(
+            lb.send_letter, payload, api_token=api_token, dry_run=req.dry_run, test_mode=test_mode
+        )
+    except Exception as e:
+        logger.error(f"❌ [LETTER] API call failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Postal API error: {e}")
+
+    if req.dry_run:
+        logger.info(f"📮 [LETTER] Dry-run complete for '{business_name}'")
+    elif result.get("ok"):
+        # Log successful order details to assets/letters/orders.json
+        try:
+            order_log = os.path.join("assets", "letters", "orders.json")
+            os.makedirs(os.path.dirname(order_log), exist_ok=True)
+            
+            # Read existing
+            try:
+                with open(order_log, "r", encoding="utf-8") as f:
+                    history = json.load(f)
+            except:
+                history = []
+                
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "business": business_name,
+                "slug": req.slug,
+                "recipient": req.recipient_name,
+                "api_response": result.get("data")
+            }
+            history.append(entry)
+            
+            with open(order_log, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2)
+                
+            logger.info(f"💾 [LETTER] Order response logged for '{business_name}' to {order_log}")
+        except Exception as log_err:
+             logger.warning(f"⚠️ [LETTER] Failed to log order: {log_err}")
+
+        logger.info(f"✅ [LETTER] Sent for '{business_name}' — response: {json.dumps(result.get('data', {}))[:200]}")
+    else:
+        logger.warning(f"⚠️ [LETTER] API returned HTTP {result.get('status_code')}: {json.dumps(result.get('data', {}))[:300]}")
+
+    return {
+        "ok": result.get("ok", True) if not req.dry_run else True,
+        "dry_run": req.dry_run,
+        "business_name": business_name,
+        "recipient": req.recipient_name,
+        "slug": req.slug,
+        "site_url": site_url,
+        "api_response": result.get("data") if not req.dry_run else None,
+        "payload_preview": {
+            "mittente": payload["mittente"],
+            "destinatari": payload["destinatari"],
+            "opzioni": payload["opzioni"],
+            "documento_chars": len(html_body),
+        } if req.dry_run else None,
+    }
+
+
+@app.get("/check-letter/{order_id}", dependencies=[Depends(verify_token)], tags=["letters"])
+async def check_letter_endpoint(order_id: str):
+    """
+    Check the current status and tracking info for a letter order by its ID.
+    Retrieves real-time data from the Ufficio Postale API.
+    """
+    import importlib.util
+
+    # Dynamically load letter_builder
+    builder_path = os.path.join(os.path.dirname(__file__), "scripts", "letter_builder.py")
+    spec = importlib.util.spec_from_file_location("letter_builder", builder_path)
+    lb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lb)
+
+    # ── 1. Determine environment ────────────────────────────────────────────
+    test_mode = False
+    api_token = os.environ.get("OPENAPI_POST_TEST", "")
+    if api_token:
+        test_mode = True
+    else:
+        api_token = os.environ.get("OPENAPI_POST", "")
+
+    if not api_token:
+        raise HTTPException(
+            status_code=500,
+            detail="Postal API token is not configured. Set it in .env to check letters."
+        )
+
+    logger.info(f"🔍 [LETTER] Checking status for ID: {order_id} ({'SANDBOX' if test_mode else 'PRODUCTION'})")
+
+    try:
+        result = await asyncio.to_thread(
+            lb.get_letter_status, order_id, api_token=api_token, test_mode=test_mode
+        )
+    except Exception as e:
+        logger.error(f"❌ [LETTER] Status check failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Postal API error: {e}")
+
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=result.get("status_code", 404),
+            detail=f"Failed to retrieve order: {json.dumps(result.get('data', {}))}"
+        )
+
+    return result.get("data")
 
 
 # ==========================================

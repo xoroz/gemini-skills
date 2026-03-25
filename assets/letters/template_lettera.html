@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>TexNGo — Lettera per ${business_name}</title>
+<style>
+  /* Print-optimized A4 letter */
+  @page { size: A4; margin: 20mm 25mm 25mm 25mm; }
+  body {
+    margin: 0; padding: 0;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 12pt;
+    line-height: 1.7;
+    color: #1a1a1a;
+    background: #ffffff;
+  }
+
+  .letter-container {
+    max-width: 170mm;
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: 12pt;
+    border-bottom: 2.5pt solid #111827;
+    margin-bottom: 18pt;
+  }
+  .header .logo-area {
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .header .logo-area .brand {
+    font-size: 18pt;
+    font-weight: 700;
+    color: #111827;
+    letter-spacing: 1pt;
+  }
+  .header .logo-area .tagline {
+    font-size: 8pt;
+    font-weight: 700;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 2pt;
+    margin-top: 2pt;
+  }
+  .header .date {
+    font-size: 9pt;
+    color: #6b7280;
+    text-align: right;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  /* Category label */
+  .category {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 8pt;
+    letter-spacing: 3pt;
+    text-transform: uppercase;
+    color: #9ca3af;
+    margin-bottom: 10pt;
+  }
+
+  /* Headline */
+  h1 {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 20pt;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.3;
+    letter-spacing: -0.3pt;
+    margin: 0 0 20pt 0;
+  }
+  h1 .accent { color: #f97316; }
+
+  /* Body paragraphs */
+  .body-text p {
+    margin: 0 0 12pt 0;
+    font-size: 11pt;
+    line-height: 1.75;
+    color: #374151;
+  }
+  .body-text strong { color: #111827; }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1pt solid #e5e7eb;
+    margin: 18pt 0;
+  }
+
+  /* Section labels */
+  .section-label {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 8pt;
+    letter-spacing: 2pt;
+    text-transform: uppercase;
+    color: #9ca3af;
+    margin: 0 0 12pt 0;
+  }
+
+  /* Detail list */
+  .detail-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 8pt 0;
+  }
+  .detail-list li {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10pt;
+    color: #374151;
+    padding: 5pt 0 5pt 20pt;
+    position: relative;
+  }
+  .detail-list li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #15803d;
+    font-weight: bold;
+  }
+
+  /* CTA box */
+  .cta-box {
+    background: #f9fafb;
+    border: 1.5pt solid #e5e7eb;
+    border-left: 4pt solid #f97316;
+    padding: 14pt 16pt;
+    margin: 18pt 0;
+  }
+  .cta-box .url {
+    font-family: 'Courier New', monospace;
+    font-size: 12pt;
+    font-weight: 700;
+    color: #111827;
+    word-break: break-all;
+  }
+  .cta-box .note {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9pt;
+    color: #6b7280;
+    margin-top: 6pt;
+  }
+
+  /* Pricing */
+  .pricing {
+    border-left: 3pt solid #f97316;
+    padding-left: 14pt;
+    margin: 12pt 0;
+  }
+  .pricing .price {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 18pt;
+    font-weight: 700;
+    color: #111827;
+  }
+  .pricing .price .period {
+    font-size: 10pt;
+    font-weight: 400;
+    color: #9ca3af;
+  }
+  .pricing .details {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10pt;
+    color: #6b7280;
+    margin-top: 4pt;
+  }
+  .pricing .details strong { color: #374151; }
+  .pricing .no-commitment {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9pt;
+    color: #9ca3af;
+    margin-top: 3pt;
+  }
+
+  /* Closing */
+  .closing {
+    margin-top: 20pt;
+  }
+  .closing p {
+    font-size: 11pt;
+    color: #374151;
+    line-height: 1.75;
+    margin: 0 0 12pt 0;
+  }
+  .closing .signature strong {
+    color: #111827;
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1pt solid #e5e7eb;
+    padding-top: 14pt;
+    margin-top: 24pt;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .footer .company {
+    font-size: 9pt;
+    color: #374151;
+    font-weight: 700;
+  }
+  .footer .contacts {
+    font-size: 8pt;
+    color: #9ca3af;
+    margin-top: 2pt;
+  }
+</style>
+</head>
+<body>
+<div class="letter-container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-area">
+      <div class="brand">TexNGo</div>
+      <div class="tagline">AI Agency</div>
+    </div>
+    <div class="date">${letter_date}</div>
+  </div>
+
+  <!-- Category -->
+  <p class="category">TexNGo &nbsp;/&nbsp; ${niche_label}</p>
+
+  <!-- Headline -->
+  <h1>
+    Anteprima del sito web professionale<br>
+    <span class="accent">per ${business_name}</span>
+  </h1>
+
+  <!-- Body -->
+  <div class="body-text">
+    <p>Gentile ${business_name},</p>
+
+    <p>
+      Siamo <strong>TexNGo</strong>, un'agenzia italiana specializzata nello sviluppo
+      di siti web professionali per attività locali attraverso l'intelligenza artificiale.
+    </p>
+
+    <p>
+      Abbiamo sviluppato un'<strong>anteprima completa del Suo nuovo sito web</strong>,
+      ottimizzata per il settore <em>${niche_label}</em>, e La invitiamo a visionarla
+      prima che venga resa disponibile ad altre attività della zona.
+    </p>
+  </div>
+
+  <hr class="divider">
+
+  <!-- Site URL -->
+  <p class="section-label">Il Suo sito è visibile all'indirizzo</p>
+  <div class="cta-box">
+    <div class="url">${site_url}</div>
+    <div class="note">
+      Digiti questo indirizzo nel browser del Suo telefono o computer per visualizzare l'anteprima.
+      Il link rimarrà attivo per <strong>48 ore</strong> dalla data di questa lettera.
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- What's included -->
+  <p class="section-label">Il sito include</p>
+  <ul class="detail-list">
+    <li>Design professionale su misura — ottimizzato per mobile, tablet e PC</li>
+    <li>Testi e immagini generati da AI, specifici per il settore ${niche_label}</li>
+    <li>Integrazione Google Maps e form di contatto</li>
+    <li>Dominio personalizzato e hosting inclusi nel canone</li>
+  </ul>
+
+  <hr class="divider">
+
+  <!-- Pricing -->
+  <p class="section-label">Condizioni economiche</p>
+  <div class="pricing">
+    <div class="price">€20 <span class="period">/ mese</span></div>
+    <div class="details">
+      Attivazione <strong>€100</strong> una tantum — hosting, manutenzione e aggiornamenti inclusi.
+    </div>
+    <div class="no-commitment">
+      Nessun vincolo contrattuale. Nessuna carta di credito richiesta per visualizzare l'anteprima.
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- How to respond -->
+  <p class="section-label">Come procedere</p>
+  <div class="body-text">
+    <p>
+      Se il progetto risponde alle Sue aspettative, può contattarci:<br>
+      &bull; <strong>Email:</strong> info@texngo.it<br>
+      &bull; <strong>Telefono:</strong> tramite il numero indicato sul sito<br>
+      &bull; <strong>Online:</strong> visiti texngo.it e compili il modulo di contatto
+    </p>
+  </div>
+
+  <!-- Closing -->
+  <div class="closing">
+    <p>Rimaniamo a disposizione per qualsiasi chiarimento o personalizzazione del progetto.</p>
+    <p class="signature">
+      Cordiali saluti,<br>
+      <strong>Il team TexNGo</strong>
+    </p>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="company">TexNGo — AI Agency</div>
+    <div class="contacts">www.texngo.it &mdash; info@texngo.it</div>
+  </div>
+
+</div>
+</body>
+</html>
