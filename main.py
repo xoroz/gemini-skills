@@ -1589,25 +1589,33 @@ async def send_letter_endpoint(req: SendLetterRequest):
             except:
                 history = []
                 
+            api_data = result.get("data", [])
+            order_info = api_data[0] if isinstance(api_data, list) and api_data else {}
+            
             entry = {
                 "timestamp": datetime.now().isoformat(),
                 "business": business_name,
                 "slug": req.slug,
                 "recipient": req.recipient_name,
-                "api_response": result.get("data")
+                "order_id": order_info.get("id"),
+                "state": order_info.get("state", "UNKNOWN"),
+                "pdf_url": order_info.get("documento_validato", {}).get("pdf"),
+                "cost": order_info.get("pricing", {}).get("totale", {}).get("importo_totale")
             }
             history.append(entry)
             
             with open(order_log, "w", encoding="utf-8") as f:
                 json.dump(history, f, indent=2)
                 
-            logger.info(f"💾 [LETTER] Order response logged for '{business_name}' to {order_log}")
+            letter_logger.info(f"💾 [LETTER] Order response logged for '{business_name}' to {order_log}")
         except Exception as log_err:
-             logger.warning(f"⚠️ [LETTER] Failed to log order: {log_err}")
+             letter_logger.warning(f"⚠️ [LETTER] Failed to log order: {log_err}")
 
-        logger.info(f"✅ [LETTER] Sent for '{business_name}' — response: {json.dumps(result.get('data', {}))[:200]}")
+        letter_logger.info(f"✅ [LETTER] Sent for '{business_name}'.")
+        letter_logger.debug(f"[RESPONSE JSON FROM API - OK] {json.dumps(result.get('data', {}), indent=2)}")
     else:
-        logger.warning(f"⚠️ [LETTER] API returned HTTP {result.get('status_code')}: {json.dumps(result.get('data', {}))[:300]}")
+        letter_logger.warning(f"⚠️ [LETTER] API returned error HTTP {result.get('status_code')}")
+        letter_logger.debug(f"[RESPONSE JSON FROM API - ERROR] {json.dumps(result.get('data', result.get('raw', {})), indent=2)}")
 
     return {
         "ok": result.get("ok", True) if not req.dry_run else True,
@@ -1670,7 +1678,45 @@ async def check_letter_endpoint(order_id: str):
             detail=f"Failed to retrieve order: {json.dumps(result.get('data', {}))}"
         )
 
-    return result.get("data")
+    # ── 2. Auto-update orders.json if state changed ──────────────────────────
+    data = result.get("data", {})
+    new_state = data.get("state")
+
+    try:
+        order_log = os.path.join("assets", "letters", "orders.json")
+        if os.path.exists(order_log) and new_state:
+            with open(order_log, "r", encoding="utf-8") as f:
+                history = json.load(f)
+            
+            updated = False
+            for entry in history:
+                # Support new format
+                if entry.get("order_id") == order_id:
+                    if entry.get("state") != new_state:
+                         entry["state"] = new_state
+                         updated = True
+                         break
+                         
+                # Fallback check for old format array
+                old_resp = entry.get("api_response")
+                if isinstance(old_resp, dict) and old_resp.get("data") and isinstance(old_resp["data"], list):
+                     if old_resp["data"][0].get("id") == order_id:
+                          if old_resp["data"][0].get("state") != new_state:
+                              old_resp["data"][0]["state"] = new_state
+                              # Upgrade old entry strictly needed fields
+                              entry["state"] = new_state
+                              entry["order_id"] = order_id
+                              updated = True
+                              break
+
+            if updated:
+                with open(order_log, "w", encoding="utf-8") as f:
+                    json.dump(history, f, indent=2)
+                logger.info(f"🔄 [LETTER] Updated order {order_id} state to {new_state} in orders.json")
+    except Exception as update_err:
+        logger.warning(f"⚠️ [LETTER] Failed to auto-update orders.json: {update_err}")
+
+    return data
 
 
 # ==========================================
