@@ -15,7 +15,7 @@ Located in `assets/emails/` and `assets/letters/`.
 ### 2. Builders (Logic Modules)
 - **`scripts/email_builder.py`**: Handles email rendering and subject generation.
 - **`scripts/letter_builder.py`**:
-    - **Address Parser**: Converts free-form Italian addresses (e.g., `"Via Roma 1, 00100 Roma RM"`) into the structured fields required by the Posta Ordinaria API (`dug`, `indirizzo`, `civico`, `cap`, `comune`, `provincia`).
+    - **Address Parser**: Converts free-form Italian addresses into structured API fields. Uses a dynamic extraction engine powered by an `_ITALIAN_PROVINCES` database to safely extract `CAP` and `Provincia` anywhere in the string, heavily reducing manual correction needs. Also handles extreme street lengths by auto-truncating to meet strict OpenAPI limits (44 chars).
     - **API Integration**: Connects to `https://ws.ufficiopostale.com` (Production) or `https://test.ws.ufficiopostale.com` (Sandbox).
 
 ### 3. CLI Testing Tools
@@ -35,12 +35,14 @@ Used for manual verification and one-off mailings:
 3.  **URL Building**: A public preview URL is generated (e.g., `https://dev.texngo.it/slug/index.html`).
 4.  **Rendering & Archiving**:
     - The `template_lettera.html` is rendered with business details.
-    - A copy of the rendered letter is **automatically saved** to `assets/letters/<business_name>.html`.
-    - Successful order details (ID, pricing, state) are logged into `assets/letters/orders.json` for tracking.
-5.  **Postal API Call**:
-    - The HTML is sent as the `documento`.
-    - The API handles the conversion to **PDF**, printing, folding, stuffing into an envelope, and mailing.
-6.  **Response**: Returns an **Order ID**, **State (e.g., CONFIRMED)**, and the calculated **Cost**.
+    - A copy of the rendered letter is **automatically saved** to `assets/letters/<slug>.html`.
+5.  **Postal API Call & Logging**:
+    - The HTML is sent as the `documento`. Full raw JSON request/response payloads are tracked in **`logs/letter.log`** (isolated from `backend.log`).
+    - The API handles the conversion to **PDF**, printing, folding, and mailing.
+6.  **Response & Tracking**: 
+    - The API returns an **Order ID**, **State**, PDF URL, and **Cost**.
+    - These key details are appended in a clean, minimal format to **`assets/letters/orders.json`**.
+7.  **Live Updates**: Calling the `GET /check-letter/{order_id}` endpoint fetches the latest delivery state from OpenAPI and **automatically rewrites** `orders.json` so the local database stays in sync with real-world delivery tracking.
 
 ### 💶 Cost Breakdown (Approximate)
 | Service | Cost (Posta Ordinaria) |
@@ -95,5 +97,6 @@ curl -X POST "https://dev.texngo.it/send-letter" \
 ---
 
 ## ⚠️ Important Notes
-- **Address Validation**: The Ufficio Postale API strictly validates the CAP/Comune/Provincia combination. If you get a **422 Error**, double-check the address (e.g., use `00187` for Roma RM instead of a generic `00100`).
-- **Sandbox vs. Prod**: The sandbox environment (`test.ws.ufficiopostale.com`) is used automatically when `OPENAPI_POST_TEST` is the primary key. This is the safest way to iterate on design without spending real money.
+- **Address Validation (12027 Conflict)**: The Ufficio Postale API strictly validates that the CAP, Comune, and Provincia match their official database. If Google Maps provides a *Frazione* (e.g., "Marina di Carrara"), the API may throw a `12027` error. Users can simply edit the Comune field to the official municipality in the frontend modal to bypass this.
+- **Troubleshooting**: Check `logs/letter.log` to see the exact JSON payload sent to the API and the exact error returned if a letter fails to send.
+- **Sandbox vs. Prod**: The sandbox environment (`test.ws.ufficiopostale.com`) is used automatically when `OPENAPI_POST_TEST` is active. This ensures 100% free structural testing.
