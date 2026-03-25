@@ -384,6 +384,28 @@ def send_letter(
     with httpx.Client(timeout=30.0) as client:
         response = client.post(url, json=payload, headers=headers)
 
+        # ── AUTO-RETRY per Frazioni (Errore 12027 Comune/Cap in conflitto) ──
+        if response.status_code == 422:
+            try:
+                err_data = response.json()
+                if err_data.get("error") == 12027:
+                    old_comune = payload["destinatari"][0].get("comune", "")
+                    fallback = ""
+                    lower_comune = old_comune.lower()
+                    if " di " in lower_comune:
+                        # Extract everything after the LAST " di "
+                        # e.g., "Marina di Carrara" -> "Carrara"
+                        fallback = old_comune.rsplit(" di ", 1)[-1].strip()
+                    elif " del " in lower_comune:
+                        fallback = old_comune.rsplit(" del ", 1)[-1].strip()
+                        
+                    if fallback and len(fallback) > 2 and fallback.lower() != lower_comune:
+                        payload["destinatari"][0]["comune"] = fallback
+                        # Retry the request with the new Comune
+                        response = client.post(url, json=payload, headers=headers)
+            except Exception:
+                pass
+
     result = {
         "status_code": response.status_code,
         "ok": response.status_code in (200, 201, 202),
