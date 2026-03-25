@@ -56,8 +56,19 @@ API_BASE_URL = "https://ws.ufficiopostale.com"
 API_TEST_URL = "https://test.ws.ufficiopostale.com"
 
 # ---------------------------------------------------------------------------
-# Italian address DUG (denominazione urbanistica generica) lookup
+# Italian address DUG (denominazione urbanistica generica) and Province lookups
 # ---------------------------------------------------------------------------
+_ITALIAN_PROVINCES = {
+    'AG', 'AL', 'AN', 'AO', 'AP', 'AQ', 'AR', 'AT', 'AV', 'BA', 'BG', 'BI', 'BL', 'BN', 'BO', 
+    'BR', 'BS', 'BT', 'BZ', 'CA', 'CB', 'CE', 'CH', 'CI', 'CL', 'CN', 'CO', 'CR', 'CS', 'CT', 
+    'CZ', 'EN', 'FC', 'FE', 'FG', 'FI', 'FM', 'FR', 'GE', 'GO', 'GR', 'IM', 'IS', 'KR', 'LC', 
+    'LE', 'LI', 'LO', 'LT', 'LU', 'MB', 'MC', 'ME', 'MI', 'MN', 'MO', 'MS', 'MT', 'NA', 'NO', 
+    'NU', 'OG', 'OR', 'PA', 'PC', 'PD', 'PE', 'PG', 'PI', 'PN', 'PO', 'PR', 'PT', 'PU', 'PV', 
+    'PZ', 'RA', 'RC', 'RE', 'RG', 'RI', 'RM', 'RN', 'RO', 'SA', 'SI', 'SO', 'SP', 'SR', 'SS', 
+    'SV', 'TA', 'TE', 'TN', 'TO', 'TP', 'TR', 'TS', 'TV', 'UD', 'VA', 'VB', 'VC', 'VE', 'VI', 
+    'VR', 'VS', 'VT', 'VV'
+}
+
 _DUG_MAP = {
     "via": "Via",
     "viale": "Viale",
@@ -122,23 +133,44 @@ def parse_address(raw: str) -> dict:
         "provincia": "",
     }
 
-    # Try to extract provincia (2-letter code at the end)
-    m_prov = re.search(r"\b([A-Z]{2})\s*$", addr)
-    if m_prov:
-        result["provincia"] = m_prov.group(1).upper()
-        addr = addr[: m_prov.start()].strip().rstrip(",").strip()
+    # 1. Extract Provincia (last matching 2 uppercase letters in the valid provinces list)
+    provs = list(re.finditer(r"\b([A-Z]{2})\b", addr))
+    for match in reversed(provs):
+        if match.group(1) in _ITALIAN_PROVINCES:
+            result["provincia"] = match.group(1)
+            # Remove the province from the string to avoid confusing comune extraction
+            addr = addr[:match.start()] + addr[match.end():]
+            break
 
-    # Try to extract CAP (5 digits)
-    m_cap = re.search(r"\b(\d{5})\b", addr)
-    if m_cap:
-        result["cap"] = m_cap.group(1)
-        # Everything after CAP (before provincia) is the comune
-        after_cap = addr[m_cap.end() :].strip().rstrip(",").strip()
+    addr = addr.strip().rstrip(",").strip()
+
+    # 2. Extract CAP (5 digits)
+    cap_match = re.search(r"\b(\d{5})\b", addr)
+    if cap_match:
+        result["cap"] = cap_match.group(1)
+        before_cap = addr[:cap_match.start()].strip().rstrip(",").strip()
+        after_cap = addr[cap_match.end():].strip().rstrip(",").strip()
+        
         if after_cap:
+            # Typical for "10100 Torino"
             result["comune"] = after_cap.strip()
-        addr = addr[: m_cap.start()].strip().rstrip(",").strip()
+            addr = before_cap
+        else:
+            # Typical for "Torino 10100"
+            parts = [p.strip() for p in before_cap.split(",") if p.strip()]
+            if len(parts) > 1:
+                result["comune"] = parts[-1]
+                addr = ", ".join(parts[:-1])
+            else:
+                addr = before_cap
+    else:
+        # No CAP found. Try extracting comune using the last comma fragment.
+        parts = [p.strip() for p in addr.split(",") if p.strip()]
+        if len(parts) > 1:
+            result["comune"] = parts[-1]
+            addr = ", ".join(parts[:-1])
 
-    # Now addr should be like "Via Roma 1" or "Via Dante Alighieri 12/A"
+    # Now addr should be something like "Via Roma 1" or "Via Dante Alighieri 12/A"
     # Try to split DUG from the rest
     parts = addr.split(None, 1)  # Split on first whitespace
     if parts:
