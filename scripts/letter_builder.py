@@ -227,8 +227,13 @@ def build_payload(
         color: Print in color (costs more)
         autoconfirm: Send immediately without manual confirmation step
     """
+    # The Ufficio Postale API limits the combination of nome + cognome to 44 characters.
+    safe_name = recipient_name.strip()
+    if len(safe_name) > 44:
+        safe_name = safe_name[:44].strip()
+
     # Parse recipient name into nome/cognome
-    name_parts = recipient_name.strip().split(None, 1)
+    name_parts = safe_name.split(None, 1)
     nome = name_parts[0] if name_parts else ""
     cognome = name_parts[1] if len(name_parts) > 1 else ""
 
