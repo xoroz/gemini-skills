@@ -1751,10 +1751,20 @@ async def score_site_endpoint(req: ScoreSiteRequest):
 
     # Resolve the input source
     if req.slug:
+        # Try directory style: sites/{slug}/index.html
         html_path = os.path.join(base_dir, "sites", req.slug, "index.html")
         if not os.path.exists(html_path):
-            raise HTTPException(status_code=404, detail=f"Site not found: sites/{req.slug}/index.html")
-        score_out = os.path.join(base_dir, "sites", req.slug, "score.json")
+            # Fall back to flat file: sites/{slug}.html
+            html_path = os.path.join(base_dir, "sites", f"{req.slug}.html")
+        if not os.path.exists(html_path):
+            raise HTTPException(status_code=404, detail=f"Site not found: {req.slug}")
+        # Write score.json inside the site directory if it exists, else scrapes/scores_tmp
+        slug_dir = os.path.join(base_dir, "sites", req.slug)
+        if os.path.isdir(slug_dir):
+            score_out = os.path.join(slug_dir, "score.json")
+        else:
+            os.makedirs(os.path.join(base_dir, "scrapes", "scores_tmp"), exist_ok=True)
+            score_out = os.path.join(base_dir, "scrapes", "scores_tmp", f"{req.slug}_score.json")
         cmd = ["uv", "run", scorer, "--html", html_path, "--out", score_out, "--label", req.label]
     elif req.screenshot_path:
         if not os.path.exists(req.screenshot_path):
