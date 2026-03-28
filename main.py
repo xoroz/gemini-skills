@@ -246,6 +246,11 @@ class ModifySiteData(BaseModel):
     target_selector: str
     prompt: str
 
+class RecreateSiteData(BaseModel):
+    site_slug: str
+    improvements: str
+    webhook_url: str
+
 class CreateFlyersData(BaseModel):
     qnt: int
 
@@ -1116,6 +1121,111 @@ async def modify_site(data: ModifySiteData):
     except Exception as e:
          logger.error(f"🔥 [MODIFY] Unexpected error: {e}")
          raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# 5b. SITE RECREATION
+# ==========================================
+
+async def recreate_site_and_notify(data: RecreateSiteData):
+    site_slug = data.site_slug
+    script_path = "./recreate.sh"
+    process = None
+    logger.info(f"⏳ [RECREATE] Queued recreation for: {site_slug} — waiting for build slot...")
+    async with build_semaphore:
+        try:
+            logger.info(f"⚙️ [RECREATE] Starting recreation for: {site_slug} "
+                        f"(timeout: {BUILD_TIMEOUT // 60}m)")
+
+            process = await asyncio.create_subprocess_exec(
+                script_path, site_slug, data.improvements,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=BUILD_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ [RECREATE] Timeout ({BUILD_TIMEOUT // 60}m) hit for: {site_slug}")
+                _kill_process_group(process)
+                payload = {
+                    "status": "timeout",
+                    "site_slug": site_slug,
+                    "error": f"Recreation exceeded {BUILD_TIMEOUT // 60}-minute timeout and was killed.",
+                }
+                await _post_webhook(data.webhook_url, payload, f"recreate-timeout/{site_slug}")
+                return
+
+            if process.returncode == 0:
+                logger.info(f"✅ [RECREATE] Success: {site_slug}")
+                await _take_screenshot(site_slug)
+
+                payload: dict = {"status": "success", "site_slug": site_slug}
+                if REMOTE_SITE_URL:
+                    payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
+
+                id_info = _lookup_site_id(site_slug)
+                if id_info:
+                    payload["site_id"] = id_info["id"]
+                    payload["url_id"] = id_info.get("url_id", "")
+            else:
+                err_text = stderr.decode(errors="replace").strip()
+                logger.error(f"❌ [RECREATE] Failed (exit {process.returncode}): {err_text}")
+                payload = {"status": "error", "site_slug": site_slug, "error": err_text}
+
+            await _post_webhook(data.webhook_url, payload, f"recreate/{site_slug}")
+
+        except Exception as e:
+            logger.error(f"🔥 [RECREATE] Unexpected error: {e}")
+            if process is not None:
+                _kill_process_group(process)
+            await _post_webhook(
+                data.webhook_url,
+                {"status": "error", "site_slug": site_slug, "error": str(e)},
+                f"recreate-exception/{site_slug}",
+            )
+
+
+@app.post("/recreate-site", dependencies=[Depends(verify_token)], tags=["sites"])
+async def recreate_site(data: RecreateSiteData, background_tasks: BackgroundTasks):
+    """
+    Recreate an existing site with improvements.
+    - Backs up the current folder to sites/<slug>_v1 (max 4 versions, _v1 = newest)
+    - Rebuilds using the original params from build.log + improvements injected into the prompt
+    - Slug and site ID remain unchanged
+    - Result delivered asynchronously via webhook_url
+    """
+    if not os.path.exists("./recreate.sh"):
+        raise HTTPException(status_code=500, detail="recreate.sh not found on server")
+
+    site_dir = os.path.join("sites", data.site_slug)
+    if not os.path.isdir(site_dir):
+        raise HTTPException(status_code=404, detail=f"Site '{data.site_slug}' not found")
+
+    logger.info(f"♻️  [RECREATE] Job received for '{data.site_slug}'")
+    logger.info(f"   [RECREATE] improvements: {data.improvements[:80]}...")
+    logger.info(f"   [RECREATE] webhook_url: {data.webhook_url}")
+
+    background_tasks.add_task(recreate_site_and_notify, data)
+
+    response: dict = {
+        "status": "processing",
+        "message": "Recreation job added to queue.",
+        "site_slug": data.site_slug,
+    }
+    if REMOTE_SITE_URL:
+        response["site_url"] = f"{REMOTE_SITE_URL}/{data.site_slug}/index.html"
+
+    id_info = _lookup_site_id(data.site_slug)
+    if id_info:
+        response["site_id"] = id_info["id"]
+        response["url_id"] = id_info.get("url_id", "")
+
+    return response
 
 
 # ==========================================

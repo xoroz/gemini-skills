@@ -663,6 +663,18 @@ STRICT SERVER-SIDE ENVIRONMENT RULES:
 - You must ONLY return the raw text to standard output for the parent script to capture.
 "
 
+# If this is a recreation, append the improvements to the prompt
+if [ -n "${SITE_IMPROVEMENTS:-}" ]; then
+  PROMPT="$PROMPT
+
+RECREATION IMPROVEMENTS — APPLY THESE:
+$SITE_IMPROVEMENTS
+
+Apply ALL the above improvements while keeping all other design rules intact.
+Do NOT change the business details, images, or section structure unless the improvements explicitly require it."
+  echo "  🔧 Improvements: ${SITE_IMPROVEMENTS:0:80}..."
+fi
+
 # Load focused system prompt for site generation from creator/CLAUDE.md
 # Falls back to a short hardcoded preamble if the file is missing
 _CREATOR_CLAUDE_MD="$SCRIPT_DIR/creator/CLAUDE.md"
