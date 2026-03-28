@@ -731,17 +731,16 @@ generate_text_with_retry() {
 
     # Dispatch to the correct CLI (with a 4-minute absolute timeout to prevent hanging)
     local cmd_ok=false
+    local exit_code=0
     if [ "$use_engine" = "claude" ]; then
       # CLAUDE_CODE_SIMPLE=1 prevents Claude from loading CLAUDE.md (not needed for site gen).
       # -p injects creator/CLAUDE.md as the system prompt (focused design rules, no project noise).
-      # --tools "" strictly disables Claude's ability to use Edit/Git/Bash, forcing raw stdout
-      if printf "%s\\n" "$prompt" | CLAUDE_CODE_SIMPLE=1 timeout 240 claude -p "$CREATOR_PREAMBLE" --model "$use_model" --dangerously-skip-permissions --tools "" > "$output_file" 2> "$err_file"; then
-        cmd_ok=true
-      fi
+      # Note: --tools is intentionally omitted; in -p (print) mode Claude already outputs raw stdout.
+      printf "%s\\n" "$prompt" | CLAUDE_CODE_SIMPLE=1 timeout 240 claude -p "$CREATOR_PREAMBLE" --model "$use_model" --dangerously-skip-permissions > "$output_file" 2> "$err_file" || exit_code=$?
+      [ $exit_code -eq 0 ] && cmd_ok=true
     else
-      if printf "%s\\n" "$prompt" | timeout 240 gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file"; then
-        cmd_ok=true
-      fi
+      printf "%s\\n" "$prompt" | timeout 240 gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file" || exit_code=$?
+      [ $exit_code -eq 0 ] && cmd_ok=true
     fi
 
     if [ "$cmd_ok" = true ] && [ -s "$output_file" ]; then
@@ -764,8 +763,11 @@ generate_text_with_retry() {
         break
       fi
     else
+      echo "[exit_code=$exit_code]" >> "$err_file"
       if [ ! -s "$output_file" ]; then
         echo "Output file was empty (silent failure)" >> "$err_file"
+      else
+        echo "stdout was non-empty but cmd failed — first line: $(head -1 "$output_file")" >> "$err_file"
       fi
     fi
 
