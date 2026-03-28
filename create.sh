@@ -777,6 +777,8 @@ generate_text_with_retry() {
     retry=$((retry + 1))
     if [ $retry -gt $max_retries ]; then
         echo "     ❌ ${label}: Failed after $max_retries retries (tried $TEXT_ENGINE + fallback)."
+        echo "     [ERROR DETAILS]:"
+        echo "$err_content" | head -10 | sed 's/^/       /'
         echo "Error details: $err_content" >> "$LOG_FILE"
         return 1
     fi
@@ -791,7 +793,7 @@ generate_text_with_retry() {
           echo "     ⚠️  ${label}: $use_engine quota exhausted. Switching engine on next retry..."
         fi
     else
-        echo "     ⚠️  ${label}: Error encountered ($use_engine). Retrying in 10s... ($retry/$max_retries)"
+        echo "     ⚠️  ${label}: Error encountered ($use_engine) — $(echo "$err_content" | head -1)"
         echo "[WARN] Retry $retry for $label ($use_engine): $err_content" >> "$LOG_FILE"
         sleep 10
     fi
