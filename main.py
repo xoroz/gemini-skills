@@ -251,6 +251,12 @@ class RecreateSiteData(BaseModel):
     improvements: str
     webhook_url: str
 
+class SendMailRequest(BaseModel):
+    to: str
+    subject: str
+    body: str                              # plain text or HTML — auto-detected
+    from_email: str = "info@texngo.it"
+
 class CreateFlyersData(BaseModel):
     qnt: int
 
@@ -1388,6 +1394,41 @@ def _smtp_send(subject: str, html_body: str, to_email: str, from_email: str) -> 
         s.ehlo()
         s.login(smtp_user, smtp_pass)
         s.send_message(msg)
+
+
+@app.post("/send-mail", dependencies=[Depends(verify_token)], tags=["email"])
+async def send_mail(req: SendMailRequest):
+    """
+    Send a plain-text or HTML email.
+    - If body contains HTML tags it is sent as-is.
+    - If body is plain text it is wrapped in a minimal HTML template.
+    - from_email defaults to info@texngo.it.
+    """
+    is_html = bool(re.search(r"<[a-zA-Z]", req.body))
+    if is_html:
+        html_body = req.body
+    else:
+        # Wrap plain text in a clean, readable HTML body
+        escaped = req.body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines_html = "".join(
+            f"<p style='margin:0 0 10px 0'>{line if line.strip() else '&nbsp;'}</p>"
+            for line in escaped.splitlines()
+        )
+        html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;font-size:15px;color:#222;
+             max-width:600px;margin:40px auto;padding:0 20px;line-height:1.6">
+{lines_html}
+</body></html>"""
+
+    try:
+        logger.info(f"📧 [MAIL] Sending to={req.to} subject={req.subject!r} from={req.from_email}")
+        await asyncio.to_thread(_smtp_send, req.subject, html_body, req.to, req.from_email)
+        logger.info(f"✅ [MAIL] Sent to {req.to}")
+        return {"status": "sent", "to": req.to, "subject": req.subject}
+    except Exception as e:
+        logger.error(f"❌ [MAIL] Failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _allocate_email_id(slug: str, business_name: str) -> Optional[dict]:
