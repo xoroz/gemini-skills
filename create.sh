@@ -1,4 +1,6 @@
 #!/bin/bash
+# Ensure standard tools are available when running under systemd (stripped PATH)
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # Usage: ./create.sh [--website <url>] "Business Name" "Niche" "Address" "Contact Info"
 #        --website <url>  Scrape the URL and use real data (frontend-clone mode)
