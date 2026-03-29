@@ -5,11 +5,15 @@
 # Language: Set SITE_LANG=en before running to generate in English (default: it)
 # Mode:     Set MODE=DEV|PROD|SUPER|MOCKUP before running (default: DEV)
 #
-#   DEV   — cheap & fast    img: flux.2-klein-4b ($0.014)  text: gemini-2.5-flash
-#   PROD  — balanced        img: gemini-2.5-flash-image ($0.038, 1K)  text: gemini-3-flash-preview
-#   SUPER — highest quality img: gemini-3.1-flash-image-preview ($0.068, 0.5K)  text: gemini-3.1-pro-preview
+#   DEV   — cheap & fast    img: flux.2-klein-4b ($0.014)    text: openrouter/xiaomi/mimo-v2-pro
+#   PROD  — balanced        img: gemini-2.5-flash-image ($0.038, 1K)  text: openrouter/anthropic/claude-sonnet-4.6
+#   SUPER — highest quality img: gemini-3.1-flash-image-preview ($0.068, 0.5K)  text: openrouter/anthropic/claude-sonnet-4.6
 #            NOTE: only gemini-3.1-flash-image-preview supports 0.5K resolution
-#   MOCKUP — skip images (local dummy.png), text: gemini-2.5-flash-lite
+#   MOCKUP — skip images (local dummy.png), text: openrouter/google/gemini-2.5-flash-lite
+#
+# TEXT_ENGINE: opencode (default) | claude | gemini
+#   opencode run "<prompt>" --yolo --model <model>  (API key via OPENROUTER_API_KEY)
+#   Override model: AI_MODEL_TEXT=openrouter/mistralai/mistral-nemo ./create.sh ...
 #
 # Examples:
 #   ./create.sh "Officina Mario" "riparazione auto" "Via Roma 42, Milano" "+39 02 1234567"
@@ -190,15 +194,24 @@ else
 fi
 
 # =============================================================================
-# TEXT ENGINE: claude (default) or gemini
-# Override via env: TEXT_ENGINE=gemini ./create.sh ...
+# TEXT ENGINE: opencode (default) | claude | gemini
+# Override via env: TEXT_ENGINE=claude ./create.sh ...
 # =============================================================================
-TEXT_ENGINE="${TEXT_ENGINE:-claude}"  # claude or gemini
+TEXT_ENGINE="${TEXT_ENGINE:-opencode}"  # opencode | claude | gemini
 
-if [ "$TEXT_ENGINE" = "claude" ]; then
+if [ "$TEXT_ENGINE" = "opencode" ]; then
+  if [ "$MODE" = "MOCKUP" ]; then
+    TEXT_MODEL="${AI_MODEL_TEXT:-openrouter/google/gemini-2.5-flash-lite}"
+  elif [ "$MODE" = "DEV" ]; then
+    TEXT_MODEL="${AI_MODEL_TEXT:-openrouter/xiaomi/mimo-v2-pro}"
+  else
+    # PROD / SUPER
+    TEXT_MODEL="${AI_MODEL_TEXT:-openrouter/anthropic/claude-sonnet-4.6}"
+  fi
+elif [ "$TEXT_ENGINE" = "claude" ]; then
   TEXT_MODEL="${AI_MODEL_TEXT:-sonnet}"
 else
-  # Gemini models
+  # gemini CLI models
   if [ "$MODE" = "MOCKUP" ]; then
     TEXT_MODEL="${AI_MODEL_TEXT:-gemini-2.5-flash-lite}"
   elif [ "$MODE" = "DEV" ]; then
@@ -684,9 +697,21 @@ else
   CREATOR_PREAMBLE="You are an expert web designer generating landing pages for local businesses. Use only the frontend-design or frontend-clone skill. Output only raw HTML or CSS — no preamble, no markdown fences."
 fi
 
+# Load skill file content for opencode (model has no filesystem access — inject inline)
+# Uses frontend-clone skill when scraping mode is active, otherwise frontend-design
+if [ -n "$WEBSITE_URL" ] && [ -n "$SCRAPED_DATA" ]; then
+  _SKILL_FILE="$SCRIPT_DIR/skills/frontend-clone/SKILL.md"
+else
+  _SKILL_FILE="$SCRIPT_DIR/skills/frontend-design/SKILL.md"
+fi
+SKILL_FILE_CONTENT=""
+if [ -f "$_SKILL_FILE" ]; then
+  SKILL_FILE_CONTENT=$(cat "$_SKILL_FILE")
+fi
+
 # Function to generate text with retry logic
-# - Supports both Claude CLI and Gemini CLI (controlled by TEXT_ENGINE)
-# - On final retry: switches to the OTHER engine as fallback
+# - Supports opencode (default), Claude CLI, and Gemini CLI (controlled by TEXT_ENGINE)
+# - On final retry: falls back to opencode with a lighter model
 # - Detects truncated HTML and usage limit messages
 # - Max 2 retries (3 total attempts)
 generate_text_with_retry() {
@@ -705,14 +730,14 @@ generate_text_with_retry() {
     local err_file
     err_file=$(mktemp)
 
-    # On retry 2: switch to the OTHER engine entirely
+    # On retry 2: fall back to opencode with a lighter model
     if [ $retry -ge 2 ]; then
-      if [ "$TEXT_ENGINE" = "claude" ]; then
-        use_engine="gemini"
-        use_model="gemini-2.5-flash"
+      use_engine="opencode"
+      if [ "$TEXT_ENGINE" = "opencode" ]; then
+        # Already opencode — switch to a different (lighter) model
+        use_model="openrouter/google/gemini-2.5-flash-lite"
       else
-        use_engine="claude"
-        use_model="sonnet"
+        use_model="openrouter/xiaomi/mimo-v2-pro"
       fi
       echo "     🔄 Switching to $use_engine ($use_model) for retry $retry..."
     fi
@@ -732,13 +757,25 @@ generate_text_with_retry() {
     # Dispatch to the correct CLI (with a 4-minute absolute timeout to prevent hanging)
     local cmd_ok=false
     local exit_code=0
-    if [ "$use_engine" = "claude" ]; then
+    if [ "$use_engine" = "opencode" ]; then
+      # Call OpenRouter API directly via scripts/openrouter_gen.py (stdin→stdout).
+      # SKILL.md content is prepended so the model has the full design spec.
+      # This avoids opencode CLI headless issues (TTY, session, file permissions).
+      local _oc_tmpfile
+      _oc_tmpfile=$(mktemp)
+      printf "%s\n\n---\n\n%s" "$SKILL_FILE_CONTENT" "$prompt" > "$_oc_tmpfile"
+      timeout 240 python3 "$SCRIPT_DIR/scripts/openrouter_gen.py" "$use_model" \
+        < "$_oc_tmpfile" > "$output_file" 2> "$err_file" || exit_code=$?
+      rm -f "$_oc_tmpfile"
+      [ $exit_code -eq 0 ] && cmd_ok=true
+    elif [ "$use_engine" = "claude" ]; then
       # CLAUDE_CODE_SIMPLE=1 prevents Claude from loading CLAUDE.md (not needed for site gen).
       # -p injects creator/CLAUDE.md as the system prompt (focused design rules, no project noise).
       # Note: --tools is intentionally omitted; in -p (print) mode Claude already outputs raw stdout.
       printf "%s\\n" "$prompt" | CLAUDE_CODE_SIMPLE=1 timeout 240 claude -p "$CREATOR_PREAMBLE" --model "$use_model" --dangerously-skip-permissions > "$output_file" 2> "$err_file" || exit_code=$?
       [ $exit_code -eq 0 ] && cmd_ok=true
     else
+      # gemini CLI
       printf "%s\\n" "$prompt" | timeout 240 gemini -m "$use_model" -y -p "" > "$output_file" 2> "$err_file" || exit_code=$?
       [ $exit_code -eq 0 ] && cmd_ok=true
     fi
