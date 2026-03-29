@@ -1,4 +1,5 @@
 #!/bin/bash
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 # Check if Gemini API is available and not rate-limited.
 # Usage: ./check_quota.sh
 

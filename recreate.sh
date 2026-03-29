@@ -1,4 +1,5 @@
 #!/bin/bash
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 # recreate.sh — Recreate an existing site with improvements.
 #
 # Usage: ./recreate.sh <site_slug> <improvements_text>

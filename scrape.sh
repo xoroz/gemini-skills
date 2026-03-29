@@ -1,4 +1,5 @@
 #!/bin/bash
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 # =============================================================================
 # scrape.sh — Query Google Maps via the Review Site Factory API
 #

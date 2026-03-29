@@ -1,4 +1,5 @@
 #!/bin/bash
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # Usage: ./modify.sh "site-slug" "#hero-title" "Make it say welcome to the best place"
 
