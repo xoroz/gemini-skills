@@ -412,8 +412,16 @@ DATA USAGE RULES:
 fi
 
 # 5. GENERATE LOCAL IMAGES WITH NANO-BANANA-PRO
+# Set SKIP_IMAGES=1 to reuse existing images (e.g. when only text/CSS changed).
+# recreate.sh sets this automatically when recreate_img=false is passed from the API.
+SKIP_IMAGES="${SKIP_IMAGES:-0}"
+
 echo "🎨 Generating images with Nano Banana Pro..."
-echo "   Mode: $MODE  |  Model: $IMG_MODEL  |  ~\$${IMG_COST_EACH}/img"
+if [ "$SKIP_IMAGES" = "1" ]; then
+  echo "   ⏭️  SKIP_IMAGES=1 — reusing images from previous version (no AI image cost)"
+else
+  echo "   Mode: $MODE  |  Model: $IMG_MODEL  |  ~\$${IMG_COST_EACH}/img"
+fi
 echo ""
 
 declare -A IMAGES
@@ -476,6 +484,25 @@ for IMG_NAME in "${!IMAGES[@]}"; do
   if [ "$MODE" = "MOCKUP" ]; then
     cp "$SCRIPT_DIR/.skel/assets/dummy.png" "$IMG_PATH" || touch "$IMG_PATH"
     echo "     ✅ Copied dummy mockup image"
+    IMAGES_GENERATED=$((IMAGES_GENERATED + 1))
+    continue
+  fi
+
+  if [ "$SKIP_IMAGES" = "1" ]; then
+    # Reuse the image from the versioned backup (_v1 folder), falling back to dummy
+    BACKUP_IMG="$SCRIPT_DIR/sites/${SITE_SLUG}_v1/assets/${IMG_NAME}.webp"
+    BACKUP_IMG_PNG="$SCRIPT_DIR/sites/${SITE_SLUG}_v1/assets/${IMG_NAME}.png"
+    if [ -f "$BACKUP_IMG" ]; then
+      cp "$BACKUP_IMG" "${IMG_PATH%.png}.webp"
+      touch "$IMG_PATH"  # placeholder so path checks pass
+      echo "     ♻️  Reused from backup: assets/${IMG_NAME}.webp"
+    elif [ -f "$BACKUP_IMG_PNG" ]; then
+      cp "$BACKUP_IMG_PNG" "$IMG_PATH"
+      echo "     ♻️  Reused from backup: assets/${IMG_NAME}.png"
+    else
+      cp "$SCRIPT_DIR/assets/dummy.png" "$IMG_PATH" 2>/dev/null || touch "$IMG_PATH"
+      echo "     ⚠️  No backup image found for ${IMG_NAME}, used dummy"
+    fi
     IMAGES_GENERATED=$((IMAGES_GENERATED + 1))
     continue
   fi

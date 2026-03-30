@@ -358,6 +358,7 @@ class RecreateSiteData(BaseModel):
     site_slug: str
     improvements: str
     webhook_url: str
+    recreate_img: bool = True  # False = reuse existing images (saves ~$0.23/run)
 
 class SendMailRequest(BaseModel):
     to: str
@@ -1251,8 +1252,9 @@ async def recreate_site_and_notify(data: RecreateSiteData):
             logger.info(f"⚙️ [RECREATE] Starting recreation for: {site_slug} "
                         f"(timeout: {BUILD_TIMEOUT // 60}m)")
 
+            recreate_img_arg = "true" if data.recreate_img else "false"
             process = await asyncio.create_subprocess_exec(
-                script_path, site_slug, data.improvements,
+                script_path, site_slug, data.improvements, recreate_img_arg,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,

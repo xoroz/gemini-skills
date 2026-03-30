@@ -16,11 +16,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SITE_SLUG="${1:-}"
 IMPROVEMENTS="${2:-}"
+RECREATE_IMG="${3:-true}"  # "true" = regenerate images (default), "false" = reuse existing
 
 # --- Validate args ---
 if [ -z "$SITE_SLUG" ] || [ -z "$IMPROVEMENTS" ]; then
-  echo "Usage: ./recreate.sh <site_slug> <improvements_text>" >&2
+  echo "Usage: ./recreate.sh <site_slug> <improvements_text> [recreate_img=true|false]" >&2
   exit 1
+fi
+
+if [ "$RECREATE_IMG" = "false" ]; then
+  export SKIP_IMAGES=1
+  echo "🖼️  Image regeneration disabled (recreate_img=false) — existing images will be reused"
 fi
 
 if [ ! -d "$SCRIPT_DIR/sites/$SITE_SLUG" ]; then
