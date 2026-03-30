@@ -176,9 +176,14 @@ REMOTE_SITE_URL="${REMOTE_SITE_URL%/}"  # strip trailing slash if any
 
 # =============================================================================
 # IMAGE MODEL & PRICING
-# Override via .env:  AI_MODEL_IMG, AI_MODEL_TEXT, AI_COST_IMG
+# Set in .env:  AI_MODEL (text), AI_MODEL_IMG (image), AI_COST_IMG
+# MODE is still used as fallback when these are not set.
 # =============================================================================
 MODE="${MODE:-DEV}"  # DEV = cheap/fast, PROD = balanced quality, SUPER = max quality, MOCKUP = skip billing
+
+# AI_MODEL is the canonical text model var — takes priority over MODE-based defaults.
+# AI_MODEL_TEXT is kept for backwards compat (explicit AI_MODEL_TEXT still wins).
+AI_MODEL_TEXT="${AI_MODEL_TEXT:-$AI_MODEL}"
 
 if [ "$MODE" = "DEV" ]; then
   IMG_MODEL="${AI_MODEL_IMG:-black-forest-labs/flux.2-klein-4b}"
