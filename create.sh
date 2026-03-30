@@ -876,6 +876,11 @@ elif "<html" in content:
     content = "<html" + content.split("<html", 1)[1]
 # Remove trailing markdown ticks if any leaked out
 content = content.replace("```", "")
+# Truncate at </html> — model sometimes appends CSS or commentary after closing tag
+lower = content.lower()
+end_idx = lower.rfind("</html>")
+if end_idx != -1:
+    content = content[:end_idx + len("</html>")]
 print(content.strip())
 ' < "$FOLDER_NAME/index.html" > "$FOLDER_NAME/index.html.tmp" && mv "$FOLDER_NAME/index.html.tmp" "$FOLDER_NAME/index.html"
 
