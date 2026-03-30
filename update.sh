@@ -34,6 +34,10 @@ if [ -f "$ENV_FILE" ]; then
         value="${value#\"}"
         value="${value%\'}"
         value="${value#\'}"
+        
+        # Guard against overwriting PATH
+        [[ "$key" == "PATH" ]] && continue
+        
         export "$key=$value"
     done < "$ENV_FILE"
 fi
