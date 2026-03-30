@@ -4,6 +4,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 import re
+import shutil
 import smtplib
 import subprocess
 import urllib.parse
@@ -83,6 +84,12 @@ if os.path.exists(_env_path):
 # Set in .env or as a system environment variable.
 # ---------------------------------------------------------------------------
 REMOTE_SITE_URL: str = os.environ.get("REMOTE_SITE_URL", "").rstrip("/")
+
+# ---------------------------------------------------------------------------
+# UV_BIN — absolute path to uv; resolved once at startup so all subprocess
+# calls work under gunicorn/systemd where ~/.local/bin is not in PATH.
+# ---------------------------------------------------------------------------
+UV_BIN: str = shutil.which("uv") or os.path.expanduser("~/.local/bin/uv")
 
 # ---------------------------------------------------------------------------
 # SITE_LANG — language for Google Maps search results (hl= param)
@@ -191,6 +198,106 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(beare
 async def health_check():
     """Simple health check endpoint for monitoring."""
     return {"status": "ok", "version": "1.0.0"}
+
+
+@app.get("/health-check-all", tags=["system"])
+async def health_check_all():
+    """
+    Comprehensive subsystem health check — no paid API calls made.
+    Returns status per component so the frontend can diagnose production issues.
+    Overall status: 'ok' | 'degraded' | 'error'
+    """
+    checks = {}
+    has_error = False
+    has_degraded = False
+
+    # api — always ok if this endpoint is reached
+    checks["api"] = {"status": "ok"}
+
+    # create.sh — critical build dependency
+    create_sh = os.path.join(os.path.dirname(__file__), "create.sh")
+    if os.path.isfile(create_sh) and os.access(create_sh, os.X_OK):
+        checks["create_sh"] = {"status": "ok", "path": create_sh}
+    else:
+        checks["create_sh"] = {"status": "error", "path": create_sh}
+        has_error = True
+
+    # image API keys — at least one required
+    has_openrouter = bool(os.getenv("OPENROUTER_API_KEY"))
+    has_gemini = bool(os.getenv("GEMINI_API_KEY"))
+    checks["openrouter_key"] = {"status": "ok" if has_openrouter else "missing"}
+    checks["gemini_key"] = {"status": "ok" if has_gemini else "missing"}
+    if not has_openrouter and not has_gemini:
+        has_error = True
+    elif not has_openrouter or not has_gemini:
+        has_degraded = True
+
+    # SMTP
+    smtp_host = os.getenv("SMTP_HOST", "")
+    if smtp_host:
+        checks["smtp"] = {"status": "ok", "host": smtp_host}
+    else:
+        checks["smtp"] = {"status": "missing"}
+        has_degraded = True
+
+    # S3
+    has_s3 = bool(os.getenv("AWS_KEY") and os.getenv("AWS_SECRET"))
+    bucket = os.getenv("AWS_s3", "")
+    checks["s3"] = {"status": "ok", "bucket": bucket} if has_s3 else {"status": "missing"}
+    if not has_s3:
+        has_degraded = True
+
+    # sites directory
+    sites_dir = os.path.join(os.path.dirname(__file__), "sites")
+    if os.path.isdir(sites_dir):
+        checks["sites_dir"] = {"status": "ok", "path": sites_dir}
+    else:
+        checks["sites_dir"] = {"status": "error", "path": sites_dir}
+        has_error = True
+
+    # ID registry stats
+    registry_path = os.path.join(sites_dir, "site-id.json")
+    try:
+        with open(registry_path) as rf:
+            registry = json.load(rf)
+        # Registry is a list of dicts with an "id" key
+        if isinstance(registry, list):
+            allocated = sum(1 for v in registry if v.get("status") != "placeholder")
+            available = sum(1 for v in registry if v.get("status") == "placeholder")
+            total = len(registry)
+        else:
+            allocated = sum(1 for v in registry.values() if v.get("status") != "placeholder")
+            available = sum(1 for v in registry.values() if v.get("status") == "placeholder")
+            total = len(registry)
+        checks["id_registry"] = {"status": "ok", "allocated": allocated, "available": available, "total": total}
+    except Exception as e:
+        checks["id_registry"] = {"status": "error", "detail": str(e)}
+        has_degraded = True
+
+    # Playwright / Chromium
+    playwright_bin = shutil.which("playwright")
+    chromium_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")
+    if playwright_bin or (chromium_path and os.path.isdir(chromium_path)):
+        checks["playwright"] = {"status": "ok"}
+    else:
+        # Try finding chromium under ~/.cache/ms-playwright
+        default_pw = os.path.expanduser("~/.cache/ms-playwright")
+        if os.path.isdir(default_pw):
+            checks["playwright"] = {"status": "ok"}
+        else:
+            checks["playwright"] = {"status": "missing"}
+            has_degraded = True
+
+    # Letter / Postal API
+    has_letter = bool(os.getenv("OPENAPI_POST") or os.getenv("OPENAPI_POST_TEST"))
+    mode = "test" if os.getenv("OPENAPI_POST_TEST") else ("prod" if os.getenv("OPENAPI_POST") else None)
+    checks["letter_api"] = {"status": "ok", "mode": mode} if has_letter else {"status": "missing"}
+    if not has_letter:
+        has_degraded = True
+
+    overall = "error" if has_error else ("degraded" if has_degraded else "ok")
+    return {"status": overall, "version": "1.0.0", "checks": checks}
+
 
 # ==========================================
 # 0. STARTUP VALIDATION
@@ -624,7 +731,7 @@ async def generate_site(data: BusinessData, background_tasks: BackgroundTasks):
         try:
             import subprocess
             result = subprocess.run(
-                ["uv", "run", "scripts/id_manager.py", "allocate",
+                [UV_BIN, "run", "scripts/id_manager.py", "allocate",
                  "--business", data.business_name,
                  "--remote-url", REMOTE_SITE_URL or ""],
                 capture_output=True, text=True, timeout=10,
@@ -1255,7 +1362,7 @@ async def generate_flyers_bg(current_ids: List[str], remote_url: str):
     try:
         logger.info(f"⚙️ [FLYER] Starting flyer generation for range: {id_range}")
         process = await asyncio.create_subprocess_exec(
-            "uv", "run", script_path, 
+            UV_BIN, "run", script_path,
             "--site-id", id_range,
             "--force",
             "--remote-url", remote_url,
@@ -1345,7 +1452,7 @@ async def assign_site(data: AssignSiteData):
     try:
         import subprocess
         result = subprocess.run(
-            ["uv", "run", "scripts/id_manager.py", "update",
+            [UV_BIN, "run", "scripts/id_manager.py", "update",
              "--id", data.site_id,
              "--slug", data.site_slug,
              "--remote-url", remote_url],
@@ -1441,7 +1548,7 @@ def _allocate_email_id(slug: str, business_name: str) -> Optional[dict]:
         return None
     try:
         result = subprocess.run(
-            ["uv", "run", id_manager, "allocate",
+            [UV_BIN, "run", id_manager, "allocate",
              "--business", business_name,
              "--remote-url", REMOTE_SITE_URL],
             capture_output=True, text=True, timeout=15,
@@ -1897,6 +2004,9 @@ async def score_site_endpoint(req: ScoreSiteRequest):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     scorer = os.path.join(base_dir, "scripts", "score_site.py")
 
+    if not os.path.isfile(UV_BIN):
+        raise HTTPException(status_code=500, detail=f"uv not found (tried: {UV_BIN})")
+
     if not os.path.exists(scorer):
         raise HTTPException(status_code=500, detail="score_site.py not found")
 
@@ -1916,16 +2026,16 @@ async def score_site_endpoint(req: ScoreSiteRequest):
         else:
             os.makedirs(os.path.join(base_dir, "scrapes", "scores_tmp"), exist_ok=True)
             score_out = os.path.join(base_dir, "scrapes", "scores_tmp", f"{req.slug}_score.json")
-        cmd = ["uv", "run", scorer, "--html", html_path, "--out", score_out, "--label", req.label]
+        cmd = [UV_BIN, "run", scorer, "--html", html_path, "--out", score_out, "--label", req.label]
     elif req.screenshot_path:
         if not os.path.exists(req.screenshot_path):
             raise HTTPException(status_code=404, detail=f"Screenshot not found: {req.screenshot_path}")
         score_out = req.screenshot_path.replace(".png", "_score.json").replace(".webp", "_score.json")
-        cmd = ["uv", "run", scorer, "--screenshot", req.screenshot_path, "--label", req.label, "--out", score_out]
+        cmd = [UV_BIN, "run", scorer, "--screenshot", req.screenshot_path, "--label", req.label, "--out", score_out]
     elif req.url:
         with tempfile.NamedTemporaryFile(suffix="_score.json", delete=False) as tmp:
             score_out = tmp.name
-        cmd = ["uv", "run", scorer, "--url", req.url, "--label", req.label, "--out", score_out]
+        cmd = [UV_BIN, "run", scorer, "--url", req.url, "--label", req.label, "--out", score_out]
     else:
         raise HTTPException(status_code=422, detail="Provide one of: slug, screenshot_path, or url")
 
