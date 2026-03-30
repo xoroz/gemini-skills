@@ -12,6 +12,7 @@ import asyncio
 import signal
 import httpx
 import os
+import sys
 import logging
 import json
 from email.message import EmailMessage
@@ -2004,11 +2005,13 @@ async def score_site_endpoint(req: ScoreSiteRequest):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     scorer = os.path.join(base_dir, "scripts", "score_site.py")
 
-    if not os.path.isfile(UV_BIN):
-        raise HTTPException(status_code=500, detail=f"uv not found (tried: {UV_BIN})")
-
     if not os.path.exists(scorer):
         raise HTTPException(status_code=500, detail="score_site.py not found")
+
+    # score_site.py needs playwright which lives in the venv — use venv Python directly
+    venv_python = os.path.join(base_dir, "venv", "bin", "python3")
+    if not os.path.isfile(venv_python):
+        venv_python = sys.executable  # fallback to current interpreter
 
     # Resolve the input source
     if req.slug:
@@ -2026,16 +2029,16 @@ async def score_site_endpoint(req: ScoreSiteRequest):
         else:
             os.makedirs(os.path.join(base_dir, "scrapes", "scores_tmp"), exist_ok=True)
             score_out = os.path.join(base_dir, "scrapes", "scores_tmp", f"{req.slug}_score.json")
-        cmd = [UV_BIN, "run", scorer, "--html", html_path, "--out", score_out, "--label", req.label]
+        cmd = [venv_python, scorer, "--html", html_path, "--out", score_out, "--label", req.label]
     elif req.screenshot_path:
         if not os.path.exists(req.screenshot_path):
             raise HTTPException(status_code=404, detail=f"Screenshot not found: {req.screenshot_path}")
         score_out = req.screenshot_path.replace(".png", "_score.json").replace(".webp", "_score.json")
-        cmd = [UV_BIN, "run", scorer, "--screenshot", req.screenshot_path, "--label", req.label, "--out", score_out]
+        cmd = [venv_python, scorer, "--screenshot", req.screenshot_path, "--label", req.label, "--out", score_out]
     elif req.url:
         with tempfile.NamedTemporaryFile(suffix="_score.json", delete=False) as tmp:
             score_out = tmp.name
-        cmd = [UV_BIN, "run", scorer, "--url", req.url, "--label", req.label, "--out", score_out]
+        cmd = [venv_python, scorer, "--url", req.url, "--label", req.label, "--out", score_out]
     else:
         raise HTTPException(status_code=422, detail="Provide one of: slug, screenshot_path, or url")
 
