@@ -741,10 +741,10 @@ generate_text_with_retry() {
     if [ $retry -ge 2 ]; then
       use_engine="opencode"
       if [ "$TEXT_ENGINE" = "opencode" ]; then
-        # Already opencode — switch to a different (lighter) model
-        use_model="openrouter/google/gemini-2.5-flash-lite"
+        # Already opencode — switch to AI_MODEL_2 (fallback model) or hardcoded default
+        use_model="openrouter/${AI_MODEL_2:-google/gemini-3.1-flash-lite-preview}"
       else
-        use_model="openrouter/xiaomi/mimo-v2-pro"
+        use_model="openrouter/${AI_MODEL_2:-google/gemini-3.1-flash-lite-preview}"
       fi
       echo "     🔄 Switching to $use_engine ($use_model) for retry $retry..."
     fi
