@@ -432,9 +432,12 @@ def _kill_process_group(process: asyncio.subprocess.Process) -> None:
             pass
 
 def _site_slug(name: str) -> str:
-    """Mirror create.sh slug logic: lowercase, spaces→hyphens, strip non-alnum-hyphen."""
+    """Mirror create.sh slug logic: lowercase, spaces→hyphens, strip non-alnum-hyphen,
+    collapse consecutive hyphens, strip leading/trailing hyphens."""
     s = name.lower().replace(" ", "-")
     s = re.sub(r"[^a-z0-9-]", "", s)
+    s = re.sub(r"-{2,}", "-", s)   # collapse --+ → -
+    s = s.strip("-")                # strip leading/trailing hyphens
     return s
 
 
@@ -598,11 +601,9 @@ async def build_site_and_notify(data: BusinessData):
     if os.path.exists(index_file) and os.path.getsize(index_file) > 0 and \
        os.path.exists(css_file) and os.path.getsize(css_file) > 0:
         logger.info(f"⏭️ [BACKGROUND] Site '{site_slug}' already exists and is complete. Skipping build.")
-        payload: dict = {"status": "success", "business_name": data.business_name}
+        payload: dict = {"status": "success", "business_name": data.business_name, "site_slug": site_slug}
         if REMOTE_SITE_URL:
             payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
-        else:
-            payload["site_slug"] = site_slug
 
         # Look up site_id from registry for cache-hit payloads
         id_info = _lookup_site_id(site_slug)
@@ -656,6 +657,7 @@ async def build_site_and_notify(data: BusinessData):
                 payload = {
                     "status": "timeout",
                     "business_name": data.business_name,
+                    "site_slug": site_slug,
                     "error": f"Build exceeded {BUILD_TIMEOUT // 60}-minute timeout and was killed.",
                 }
                 await _post_webhook(data.webhook_url, payload, f"timeout/{site_slug}")
@@ -666,11 +668,9 @@ async def build_site_and_notify(data: BusinessData):
 
                 await _take_screenshot(site_slug)
 
-                payload: dict = {"status": "success", "business_name": data.business_name}
+                payload: dict = {"status": "success", "business_name": data.business_name, "site_slug": site_slug}
                 if REMOTE_SITE_URL:
                     payload["site_url"] = f"{REMOTE_SITE_URL}/{site_slug}/index.html"
-                else:
-                    payload["site_slug"] = site_slug
 
                 # Parse site_id/url_id from build output
                 build_output = stdout.decode(errors="replace")
@@ -687,7 +687,7 @@ async def build_site_and_notify(data: BusinessData):
             else:
                 err_text = stderr.decode(errors="replace").strip()
                 logger.error(f"❌ [BACKGROUND] Failed (exit {process.returncode}): {err_text}")
-                payload = {"status": "error", "error": err_text}
+                payload = {"status": "error", "site_slug": site_slug, "error": err_text}
 
             # Send result back to n8n Webhook
             await _post_webhook(data.webhook_url, payload, f"build/{site_slug}")

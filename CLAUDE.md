@@ -97,6 +97,18 @@ The Notion database has these properties:
 
 ---
 
+## DEV Environment Limitations
+
+This repo may be running in a **sandboxed DEV environment** where live integrations are unavailable:
+
+- Gemini CLI, `uv`, `playwright`, `systemd` may not be installed
+- API calls (Gemini, OpenRouter, SMTP, Google Maps) will fail without valid keys
+- `create.sh` end-to-end builds require all external tools present
+- **It is OK for live/integration tests to fail in DEV** — the maintainer runs full tests before pushing to PROD
+- Focus on logic correctness; do not stress about runtime failures in this environment
+
+---
+
 ## Stack
 
 - **Python + FastAPI** (`main.py`)
